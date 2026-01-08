@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Altilunium Locationpad</title>
+    <link rel="icon" href="https://static.miraheze.org/pustakawiki/4/42/Logo_pustaka.png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+
+    <style>
+        /* General Reset */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+
+        /* Map Container */
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* UI Overlay Elements */
+        .ui-container {
+            position: absolute;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Search Bar */
+        #search-box {
+            top: 20px;
+            left: 50px;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #a71d2a; }
+
+        /* Delete All Button */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        /* Modal Styles */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group input { width: 100%; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn-secondary { background: #6c757d; }
+
+        /* Emoji Icon Style */
+        .emoji-marker {
+            font-family: 'Noto Color Emoji', sans-serif;
+            font-size: 30px;
+            text-align: center;
+            line-height: 1;
+            text-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        /* Label Style */
+        .custom-label {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #333;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            font-size: 11px;
+            font-weight: bold;
+            color: #000;
+            padding: 2px 5px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-left:before, .leaflet-tooltip-right:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-top:before {
+            border: none !important;
+        }
+        
+        /* Context Menu */
+        #context-menu {
+            display: none;
+            position: absolute;
+            z-index: 3000;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 150px;
+        }
+        #context-menu div { padding: 8px 15px; cursor: pointer; font-size: 14px; }
+        #context-menu div:hover { background-color: #f0f0f0; }
+
+        /* Popup Button Styles */
+        .popup-btn-container { margin-top:10px; display:flex; gap:5px; }
+        .popup-btn { padding: 3px 8px; font-size: 11px; }
+
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="search-box" class="ui-container">
+        <input type="text" id="coord-input" placeholder="Lat, Lng (e.g. -6.2, 106.8)">
+        <button onclick="handleSearch()">Go</button>
+    </div>
+
+    <div id="controls" class="ui-container">
+        <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
+    </div>
+
+    <div id="context-menu">
+        <div onclick="openModal('add')">Add new places</div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modal-title">Add New Place</div>
+            <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
+            
+            <div class="form-group">
+                <label>Label / Name</label>
+                <input type="text" id="place-label" placeholder="e.g. My Favorite Cafe">
+            </div>
+            
+            <div class="form-group">
+                <label>Icon (Emoji)</label>
+                <input type="text" id="place-emoji" placeholder="📍" value="📍">
+                <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="savePlace()">Save</button>
+            </div>
+            
+            <div style="margin-top:10px; text-align: right;">
+                 <button id="btn-delete-single" class="danger" style="display:none; width:100%" onclick="deleteSinglePlace()">Delete Marker</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Init Map
+        const map = L.map('map').setView([-6.200000, 106.816666], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+        let searchMarker = null;
+        let savedMarkers = [];
+        let contextMenuTargetLatLng = null;
+
+        // --- Local Storage ---
+        function loadFromStorage() {
+            const data = localStorage.getItem('myMapMarkers');
+            if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
+        }
+
+        function saveToStorage(placesArray) {
+            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+        }
+
+        function getPlacesData() {
+            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+        }
+
+        // --- Search ---
+        function handleSearch() {
+            const input = document.getElementById('coord-input').value;
+            const parts = input.split(',');
+            if (parts.length !== 2) { alert("Format: Lat, Lng"); return; }
+            
+            const lat = parseFloat(parts[0].trim());
+            const lng = parseFloat(parts[1].trim());
+            if (isNaN(lat) || isNaN(lng)) { alert("Invalid coords"); return; }
+
+            if (searchMarker) map.removeLayer(searchMarker);
+            searchMarker = L.marker([lat, lng]).addTo(map);
+            
+            // Popup with 2 buttons and helper text
+            const popupContent = `
+                <div>
+                    <strong>Search Result</strong><br>${lat}, ${lng}
+                    <div class="popup-btn-container">
+                        <button onclick="removeSearchMarker()" class="danger popup-btn">Close</button>
+                        <button onclick="addFromSearch(${lat}, ${lng})" class="popup-btn">Add Place</button>
+                    </div>
+                    <div style="margin-top:5px; font-size:10px; color:#666; font-style:italic;">
+                        Or right-click to add place
+                    </div>
+                </div>
+            `;
+
+            searchMarker.bindPopup(popupContent).openPopup();
+
+            // Right click functionality on the marker itself
+            searchMarker.on('contextmenu', function(e) { showContextMenu(e, lat, lng); });
+            map.flyTo([lat, lng], 15);
+        }
+
+        function removeSearchMarker() {
+            if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+        }
+
+        function addFromSearch(lat, lng) {
+            // Set the target coordinates then open modal
+            contextMenuTargetLatLng = { lat, lng };
+            openModal('add');
+        }
+
+        // --- Context Menu ---
+        const contextMenu = document.getElementById('context-menu');
+        
+        function showContextMenu(e, lat, lng) {
+            contextMenuTargetLatLng = { lat, lng };
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.containerPoint.x + 'px';
+            contextMenu.style.top = e.containerPoint.y + 'px';
+        }
+
+        map.on('contextmenu', (e) => {
+            showContextMenu(e, e.latlng.lat, e.latlng.lng);
+        });
+
+        map.on('click', () => { contextMenu.style.display = 'none'; });
+
+        // --- CRUD Modal ---
+        function openModal(mode, placeData = null) {
+            contextMenu.style.display = 'none';
+            const modal = document.getElementById('modal');
+            const title = document.getElementById('modal-title');
+            const delBtn = document.getElementById('btn-delete-single');
+
+            if (mode === 'add') {
+                title.innerText = "Add New Place";
+                document.getElementById('place-label').value = "";
+                document.getElementById('place-emoji').value = "📍";
+                document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
+                document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
+                document.getElementById('current-id').value = Date.now();
+                delBtn.style.display = "none";
+            } else {
+                title.innerText = "Edit Place";
+                document.getElementById('place-label').value = placeData.label;
+                document.getElementById('place-emoji').value = placeData.emoji;
+                document.getElementById('current-lat').value = placeData.lat;
+                document.getElementById('current-lng').value = placeData.lng;
+                document.getElementById('current-id').value = placeData.id;
+                delBtn.style.display = "block";
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        function savePlace() {
+            const id = document.getElementById('current-id').value;
+            const lat = parseFloat(document.getElementById('current-lat').value);
+            const lng = parseFloat(document.getElementById('current-lng').value);
+            const label = document.getElementById('place-label').value;
+            const emoji = document.getElementById('place-emoji').value || "📍";
+
+            if (!label) { alert("Label required"); return; }
+
+            const places = getPlacesData();
+            const index = places.findIndex(p => p.id == id);
+            const newPlace = { id, lat, lng, label, emoji };
+
+            if (index > -1) {
+                places[index] = newPlace;
+                const existing = savedMarkers.find(m => m.options.placeId == id);
+                if(existing) map.removeLayer(existing);
+            } else {
+                places.push(newPlace);
+                removeSearchMarker(); // Close search marker if adding new
+            }
+
+            saveToStorage(places);
+            createSavedMarker(newPlace);
+            closeModal();
+        }
+
+        function deleteSinglePlace() {
+            const id = document.getElementById('current-id').value;
+            if(!confirm("Delete this marker?")) return;
+            const places = getPlacesData().filter(p => p.id != id);
+            saveToStorage(places);
+            const marker = savedMarkers.find(m => m.options.placeId == id);
+            if (marker) map.removeLayer(marker);
+            savedMarkers = savedMarkers.filter(m => m.options.placeId != id);
+            closeModal();
+        }
+
+        function clearAllMarkers() {
+            if(!confirm("Delete ALL markers?")) return;
+            localStorage.removeItem('myMapMarkers');
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+        }
+
+        // --- Render ---
+        function createSavedMarker(placeData) {
+            const emojiIcon = L.divIcon({
+                className: 'emoji-marker',
+                html: `<div>${placeData.emoji}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([placeData.lat, placeData.lng], {
+                icon: emojiIcon,
+                placeId: placeData.id
+            }).addTo(map);
+
+            marker.bindTooltip(placeData.label, { 
+                permanent: true,       
+                direction: 'bottom',   
+                className: 'custom-label', 
+                offset: [0, 10]        
+            });
+
+            marker.on('click', () => { openModal('edit', placeData); });
+            savedMarkers.push(marker);
+        }
+
+        loadFromStorage();
+        document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
+
+    </script>
+</body>
+</html>
