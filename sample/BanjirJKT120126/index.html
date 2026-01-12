@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Altilunium Locationpad</title>
+    <link rel="icon" href="https://static.miraheze.org/pustakawiki/4/42/Logo_pustaka.png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+
+    <style>
+        /* General Reset */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+
+        /* Map Container */
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* UI Overlay Elements */
+        .ui-container {
+            position: absolute;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Search Bar */
+        #search-box {
+            top: 20px;
+            left: 50px;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #a71d2a; }
+
+        /* Delete All Button */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        /* Modal Styles */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group input { width: 100%; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn-secondary { background: #6c757d; }
+
+        /* Emoji Icon Style */
+        .emoji-marker {
+            font-family: 'Noto Color Emoji', sans-serif;
+            font-size: 30px;
+            text-align: center;
+            line-height: 1;
+            text-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        /* Label Style */
+        .custom-label {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #333;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            font-size: 11px;
+            font-weight: bold;
+            color: #000;
+            padding: 2px 5px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-left:before, .leaflet-tooltip-right:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-top:before {
+            border: none !important;
+        }
+        
+        /* Context Menu */
+        #context-menu {
+            display: none;
+            position: absolute;
+            z-index: 3000;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 150px;
+        }
+        #context-menu div { padding: 8px 15px; cursor: pointer; font-size: 14px; }
+        #context-menu div:hover { background-color: #f0f0f0; }
+
+        /* Popup Button Styles */
+        .popup-btn-container { margin-top:10px; display:flex; gap:5px; }
+        .popup-btn { padding: 3px 8px; font-size: 11px; }
+
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="search-box" class="ui-container">
+        <input type="text" id="coord-input" placeholder="Lat, Lng (e.g. -6.2, 106.8)">
+        <button onclick="handleSearch()">Go</button>
+    </div>
+
+    <div id="controls" class="ui-container">
+        <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
+    </div>
+
+    <div id="context-menu">
+        <div onclick="openModal('add')">Add new places</div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modal-title">Add New Place</div>
+            <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
+            
+            <div class="form-group">
+                <label>Label / Name</label>
+                <input type="text" id="place-label" placeholder="e.g. My Favorite Cafe">
+            </div>
+            
+            <div class="form-group">
+                <label>Icon (Emoji)</label>
+                <input type="text" id="place-emoji" placeholder="📍" value="📍">
+                <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="savePlace()">Save</button>
+            </div>
+            
+            <div style="margin-top:10px; text-align: right;">
+                 <button id="btn-delete-single" class="danger" style="display:none; width:100%" onclick="deleteSinglePlace()">Delete Marker</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Init Map
+        const map = L.map('map').setView([-6.200000, 106.816666], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+        let searchMarker = null;
+        let savedMarkers = [];
+        let contextMenuTargetLatLng = null;
+
+        // --- Local Storage ---
+        function loadFromStorage() {
+            //const data = localStorage.getItem('myMapMarkers');
+            const data = `[
+    {
+        "id": "1768198403858",
+        "lat": -6.159443161234187,
+        "lng": 106.97440496669584,
+        "label": "[12.56] ",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768198567048",
+        "lat": -6.1523025034697145,
+        "lng": 106.97571220607682,
+        "label": "Harapan Indah",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768198762269",
+        "lat": -6.039976906039166,
+        "lng": 106.69610280744162,
+        "label": "PIK 2",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768198824445",
+        "lat": -6.243438250133305,
+        "lng": 106.80191540769663,
+        "label": "Blok M",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768198943699",
+        "lat": -6.067450659010334,
+        "lng": 106.70909786582534,
+        "label": "[12.16] ",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768199228303",
+        "lat": -6.153983988696845,
+        "lng": 106.72642603592823,
+        "label": "Rawa Buaya",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768199452636",
+        "lat": -6.153882212917609,
+        "lng": 106.70540749421029,
+        "label": "Kalideres",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768199646217",
+        "lat": -6.125065668079496,
+        "lng": 106.66677474975587,
+        "label": "[11.29] ",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768199690896",
+        "lat": -6.125108338433812,
+        "lng": 106.65098190307619,
+        "label": "Perkantoran Soetta",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768199983685",
+        "lat": -6.282544192912862,
+        "lng": 106.84931475927503,
+        "label": "Condet",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768200056316",
+        "lat": -6.288332034812706,
+        "lng": 106.85190957647961,
+        "label": "Kayu Manis",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768200373472",
+        "lat": -6.26370149575762,
+        "lng": 106.86419505914141,
+        "label": "[11.04] ",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768200429207",
+        "lat": -6.271292762674002,
+        "lng": 106.86023474725366,
+        "label": "[11.04]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768200570197",
+        "lat": -6.2612092854633845,
+        "lng": 106.86607360839845,
+        "label": "Cililitan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768200698571",
+        "lat": -6.180603611561222,
+        "lng": 106.82817999004229,
+        "label": "Balai Kota",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768200837066",
+        "lat": -6.093744963370737,
+        "lng": 106.75103712443264,
+        "label": "Pantai Maju",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768200975296",
+        "lat": -6.135770969293343,
+        "lng": 106.76312561604512,
+        "label": "[3C] Rusun Kapuk Muara",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201073654",
+        "lat": -6.126360848201501,
+        "lng": 106.79221313651962,
+        "label": "[3C-3D-12C-12H] Penjaringan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201148701",
+        "lat": -6.156982927852992,
+        "lng": 106.75765572896142,
+        "label": "[3D] Taman Kota",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201174813",
+        "lat": -6.144224313831828,
+        "lng": 106.77728176116945,
+        "label": "[3D] Tubagus Angke",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201238708",
+        "lat": -6.115584431128376,
+        "lng": 106.79137893090191,
+        "label": "[9F] Pluit",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201300539",
+        "lat": -6.147942139297693,
+        "lng": 106.79863576941632,
+        "label": "[9F] Rusun Tambora",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201370018",
+        "lat": -6.104657518964135,
+        "lng": 106.77076492682956,
+        "label": "[12A] Pelabuhan Kaliadem",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201428938",
+        "lat": -6.1374243700236795,
+        "lng": 106.81422627685083,
+        "label": "[12A] Kota",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201489145",
+        "lat": -6.111078253698172,
+        "lng": 106.80019088991847,
+        "label": "[12C] Rusun Waduk Pluit",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201568984",
+        "lat": -6.130360008056826,
+        "lng": 106.7956138919392,
+        "label": "[12H] Rusun Penjaringan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201686719",
+        "lat": -6.10948595628725,
+        "lng": 106.88097229529133,
+        "label": "[JAK.01;15;29;77;87;88;89;90;115;117] Tanjung Priok",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201736462",
+        "lat": -6.1278066264245865,
+        "lng": 106.89412697434017,
+        "label": "[JAK.01] Plumpang",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201795381",
+        "lat": -6.139500927083886,
+        "lng": 106.96925782990041,
+        "label": "[JAK.05;58] Rorotan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768201970347",
+        "lat": -6.113840763907792,
+        "lng": 106.92636261003723,
+        "label": "[JAK.05] Semper",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202036133",
+        "lat": -6.096113351883122,
+        "lng": 106.96271828018389,
+        "label": "[JAK.15;110A] Rusun Marunda",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202098857",
+        "lat": -6.176748981735703,
+        "lng": 106.8429376306731,
+        "label": "[JAK.24] Senen",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202138825",
+        "lat": -6.182257897231497,
+        "lng": 106.90912186838942,
+        "label": "[JAK.24;61;112] Pulo Gadung",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202195496",
+        "lat": -6.1428906679896205,
+        "lng": 106.89041548966674,
+        "label": "[JAK.24;61] Kelapa Gading",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202304990",
+        "lat": -6.153076657509994,
+        "lng": 106.92342947599188,
+        "label": "[JAK.29] Sukapura",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202421460",
+        "lat": -6.122140677083297,
+        "lng": 106.91699793585032,
+        "label": "[JAK.58] Cilincing",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202566987",
+        "lat": -6.1666868956392795,
+        "lng": 106.87614480539794,
+        "label": "[JAK.61] Cempaka Putih",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202642370",
+        "lat": -6.1722003562196415,
+        "lng": 106.88910220890605,
+        "label": "[JAK.76] Perintis Kemerdekaan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202820927",
+        "lat": -6.152852306871054,
+        "lng": 106.84402659330438,
+        "label": "[JAK.76] Industri Raya",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202909223",
+        "lat": -6.125289199905009,
+        "lng": 106.85682743396482,
+        "label": "[JAK.77;120] JIS",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768202979013",
+        "lat": -6.198304094204541,
+        "lng": 106.89071720686306,
+        "label": "[JAK.87] Rawamangun",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203050388",
+        "lat": -6.123516699339365,
+        "lng": 106.81411862688802,
+        "label": "[JAK.88] Ancol Barat",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203138491",
+        "lat": -6.131530398967662,
+        "lng": 106.81166920987876,
+        "label": "[JAK.89] Taman Kota Intan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203234210",
+        "lat": -6.153272829789835,
+        "lng": 106.85347984610877,
+        "label": "[JAK.90] Rusun Kemayoran",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203332161",
+        "lat": -6.21117137953927,
+        "lng": 106.95137186882599,
+        "label": "[JAK.110A] Pulo Gebang",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203450095",
+        "lat": -6.141656774551206,
+        "lng": 106.90733888740161,
+        "label": "[JAK.112] Tanah Merah",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203786683",
+        "lat": -6.113724418458311,
+        "lng": 106.89309951954992,
+        "label": "[JAK.113] Sindang Koja",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768203856257",
+        "lat": -6.134495733439498,
+        "lng": 106.93868637084961,
+        "label": "[JAK.113] Kampung Sawah",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204009127",
+        "lat": -6.182362380855324,
+        "lng": 106.91852530566575,
+        "label": "[JAK.115] Pegangsaan Dua",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204073318",
+        "lat": -6.106766386291657,
+        "lng": 106.92162919150122,
+        "label": "[JAK.117] Tanah Merdeka",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204151941",
+        "lat": -6.127198651737218,
+        "lng": 106.87301166203717,
+        "label": "[JAK.118] Waduk Papanggo",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204278156",
+        "lat": -6.109633364424438,
+        "lng": 106.77365398382116,
+        "label": "[JAK.120] Muara Angke",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204598384",
+        "lat": -6.159755538417855,
+        "lng": 106.88281059265138,
+        "label": "[10.24]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768204722974",
+        "lat": -6.145504376967185,
+        "lng": 106.84796333312988,
+        "label": "[1W] Ancol",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768204740286",
+        "lat": -6.130655455448263,
+        "lng": 106.83088302612305,
+        "label": "[10.10]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768204840380",
+        "lat": -6.227859271647666,
+        "lng": 106.8012446165085,
+        "label": "[10H] Bundaran Senayan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768205107401",
+        "lat": -6.15551009765311,
+        "lng": 106.96503639221193,
+        "label": "[10.01]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768205241591",
+        "lat": -6.225783092649896,
+        "lng": 106.8665801341098,
+        "label": "[5N] Kp Melayu",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768205266623",
+        "lat": -6.305610290259786,
+        "lng": 106.82048331825347,
+        "label": "[5N] Ragunan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768205458868",
+        "lat": -6.255432187508438,
+        "lng": 106.82482666885566,
+        "label": "[9.49]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768205710945",
+        "lat": -6.1907223036645735,
+        "lng": 106.96762848481798,
+        "label": "[JAK.40] Rawa Kuning",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768205778328",
+        "lat": -6.1829235259147195,
+        "lng": 106.99048519134523,
+        "label": "[JAK.40] Harapan Baru",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768205858095",
+        "lat": -6.182806195198336,
+        "lng": 106.97725653648378,
+        "label": "[9.42]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768206006757",
+        "lat": -6.175136976487398,
+        "lng": 106.9817090034485,
+        "label": "[9.42]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768208601542",
+        "lat": -6.159758619051083,
+        "lng": 106.79136559573656,
+        "label": "[9:27]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768208820195",
+        "lat": -6.164598286179363,
+        "lng": 106.7966151237488,
+        "label": "[9.14]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768209163198",
+        "lat": -6.2898329270601145,
+        "lng": 106.86418533325197,
+        "label": "[8.40]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768209282541",
+        "lat": -6.13714247755995,
+        "lng": 106.83314158638915,
+        "label": "[8.37]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768209418547",
+        "lat": -6.1531022014065675,
+        "lng": 106.72839769859159,
+        "label": "Cengkareng",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768209492002",
+        "lat": -6.150389922957884,
+        "lng": 106.77256107330322,
+        "label": "[JAK.79] Tubagus Angke",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768209544513",
+        "lat": -6.1434776089144405,
+        "lng": 106.76223993301393,
+        "label": "[8:17]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768209676960",
+        "lat": -6.185478626288922,
+        "lng": 106.81116801748554,
+        "label": "Tanah Abang",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768209777494",
+        "lat": -6.12791234935441,
+        "lng": 106.80958823470978,
+        "label": "[08:08]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768209914604",
+        "lat": -6.188900708950748,
+        "lng": 106.73507030279053,
+        "label": "[3E] Puri Kembangan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768210031979",
+        "lat": -6.138157970017276,
+        "lng": 106.73301343816802,
+        "label": "[08.05]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768210149993",
+        "lat": -6.309510133979851,
+        "lng": 106.88256916021713,
+        "label": "Kp Rambutan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768210175401",
+        "lat": -6.290968007841174,
+        "lng": 106.88625075236857,
+        "label": "Pinang Ranti",
+        "emoji": "📍"
+    },
+    {
+        "id": "1768210230000",
+        "lat": -6.303205728044517,
+        "lng": 106.8763303756714,
+        "label": "[7.59]",
+        "emoji": "🌊"
+    },
+    {
+        "id": "1768210433117",
+        "lat": -6.1283512753817435,
+        "lng": 106.92654132843019,
+        "label": "[7.49]",
+        "emoji": "🌊"
+    }
+]`
+            if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
+        }
+
+        function saveToStorage(placesArray) {
+            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+        }
+
+        function getPlacesData() {
+            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+        }
+
+        // --- Search ---
+        function handleSearch() {
+            const input = document.getElementById('coord-input').value;
+            const parts = input.split(',');
+            if (parts.length !== 2) { alert("Format: Lat, Lng"); return; }
+            
+            const lat = parseFloat(parts[0].trim());
+            const lng = parseFloat(parts[1].trim());
+            if (isNaN(lat) || isNaN(lng)) { alert("Invalid coords"); return; }
+
+            if (searchMarker) map.removeLayer(searchMarker);
+            searchMarker = L.marker([lat, lng]).addTo(map);
+            
+            // Popup with 2 buttons and helper text
+            const popupContent = `
+                <div>
+                    <strong>Search Result</strong><br>${lat}, ${lng}
+                    <div class="popup-btn-container">
+                        <button onclick="removeSearchMarker()" class="danger popup-btn">Close</button>
+                        <button onclick="addFromSearch(${lat}, ${lng})" class="popup-btn">Add Place</button>
+                    </div>
+                    <div style="margin-top:5px; font-size:10px; color:#666; font-style:italic;">
+                        Or right-click to add place
+                    </div>
+                </div>
+            `;
+
+            searchMarker.bindPopup(popupContent).openPopup();
+
+            // Right click functionality on the marker itself
+            searchMarker.on('contextmenu', function(e) { showContextMenu(e, lat, lng); });
+            map.flyTo([lat, lng], 15);
+        }
+
+        function removeSearchMarker() {
+            if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+        }
+
+        function addFromSearch(lat, lng) {
+            // Set the target coordinates then open modal
+            contextMenuTargetLatLng = { lat, lng };
+            openModal('add');
+        }
+
+        // --- Context Menu ---
+        const contextMenu = document.getElementById('context-menu');
+        
+        function showContextMenu(e, lat, lng) {
+            contextMenuTargetLatLng = { lat, lng };
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.containerPoint.x + 'px';
+            contextMenu.style.top = e.containerPoint.y + 'px';
+        }
+
+        map.on('contextmenu', (e) => {
+            showContextMenu(e, e.latlng.lat, e.latlng.lng);
+        });
+
+        map.on('click', () => { contextMenu.style.display = 'none'; });
+
+        // --- CRUD Modal ---
+        function openModal(mode, placeData = null) {
+            contextMenu.style.display = 'none';
+            const modal = document.getElementById('modal');
+            const title = document.getElementById('modal-title');
+            const delBtn = document.getElementById('btn-delete-single');
+
+            if (mode === 'add') {
+                title.innerText = "Add New Place";
+                document.getElementById('place-label').value = "";
+                document.getElementById('place-emoji').value = "📍";
+                document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
+                document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
+                document.getElementById('current-id').value = Date.now();
+                delBtn.style.display = "none";
+            } else {
+                title.innerText = "Edit Place";
+                document.getElementById('place-label').value = placeData.label;
+                document.getElementById('place-emoji').value = placeData.emoji;
+                document.getElementById('current-lat').value = placeData.lat;
+                document.getElementById('current-lng').value = placeData.lng;
+                document.getElementById('current-id').value = placeData.id;
+                delBtn.style.display = "block";
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        function savePlace() {
+            const id = document.getElementById('current-id').value;
+            const lat = parseFloat(document.getElementById('current-lat').value);
+            const lng = parseFloat(document.getElementById('current-lng').value);
+            const label = document.getElementById('place-label').value;
+            const emoji = document.getElementById('place-emoji').value || "📍";
+
+            if (!label) { alert("Label required"); return; }
+
+            const places = getPlacesData();
+            const index = places.findIndex(p => p.id == id);
+            const newPlace = { id, lat, lng, label, emoji };
+
+            if (index > -1) {
+                places[index] = newPlace;
+                const existing = savedMarkers.find(m => m.options.placeId == id);
+                if(existing) map.removeLayer(existing);
+            } else {
+                places.push(newPlace);
+                removeSearchMarker(); // Close search marker if adding new
+            }
+
+            saveToStorage(places);
+            createSavedMarker(newPlace);
+            closeModal();
+        }
+
+        function deleteSinglePlace() {
+            const id = document.getElementById('current-id').value;
+            if(!confirm("Delete this marker?")) return;
+            const places = getPlacesData().filter(p => p.id != id);
+            saveToStorage(places);
+            const marker = savedMarkers.find(m => m.options.placeId == id);
+            if (marker) map.removeLayer(marker);
+            savedMarkers = savedMarkers.filter(m => m.options.placeId != id);
+            closeModal();
+        }
+
+        function clearAllMarkers() {
+            if(!confirm("Delete ALL markers?")) return;
+            localStorage.removeItem('myMapMarkers');
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+        }
+
+        // --- Render ---
+        function createSavedMarker(placeData) {
+            const emojiIcon = L.divIcon({
+                className: 'emoji-marker',
+                html: `<div>${placeData.emoji}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([placeData.lat, placeData.lng], {
+                icon: emojiIcon,
+                placeId: placeData.id
+            }).addTo(map);
+
+            marker.bindTooltip(placeData.label, { 
+                permanent: true,       
+                direction: 'bottom',   
+                className: 'custom-label', 
+                offset: [0, 10]        
+            });
+
+            marker.on('click', () => { openModal('edit', placeData); });
+            savedMarkers.push(marker);
+        }
+
+        loadFromStorage();
+        document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
+
+    </script>
+</body>
+</html>
