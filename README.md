@@ -14,4 +14,5 @@ To add a new place, either paste the coordinates or right-click on the map (tap 
 
 
 ## Developer blog
+* v26.1.25 : Press Ctrl+. to toggle the visibility of UI elements.
 * v26.1.8 : "[A trip to the Ragunan Zoo](https://www.openstreetmap.org/user/rphyrin/diary/408054)"
