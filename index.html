@@ -366,6 +366,25 @@
         loadFromStorage();
         document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
 
+
+document.addEventListener('keydown', function (e) {
+  if (e.ctrlKey && e.key === '.') {
+    e.preventDefault();
+    console.log("nya")
+
+     const controls = document.querySelector('#controls');
+    const searchBox = document.querySelector('#search-box');
+
+    [controls, searchBox].forEach(el => {
+      if (!el) return;
+      el.style.display = el.style.display === 'none' ? '' : 'none';
+    });
+  
+  }
+});
+
+        
+
     </script>
 </body>
 </html>
