@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Altilunium Locationpad</title>
+    <link rel="icon" href="https://static.miraheze.org/pustakawiki/4/42/Logo_pustaka.png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+
+    <style>
+        /* General Reset */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+
+        /* Map Container */
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* UI Overlay Elements */
+        .ui-container {
+            position: absolute;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Search Bar */
+        #search-box {
+            top: 20px;
+            left: 50px;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #a71d2a; }
+
+        /* Delete All Button */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        /* Modal Styles */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group input { width: 100%; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn-secondary { background: #6c757d; }
+
+        /* Emoji Icon Style */
+        .emoji-marker {
+            font-family: 'Noto Color Emoji', sans-serif;
+            font-size: 30px;
+            text-align: center;
+            line-height: 1;
+            text-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        /* Label Style */
+        .custom-label {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #333;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            font-size: 11px;
+            font-weight: bold;
+            color: #000;
+            padding: 2px 5px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-left:before, .leaflet-tooltip-right:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-top:before {
+            border: none !important;
+        }
+        
+        /* Context Menu */
+        #context-menu {
+            display: none;
+            position: absolute;
+            z-index: 3000;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 150px;
+        }
+        #context-menu div { padding: 8px 15px; cursor: pointer; font-size: 14px; }
+        #context-menu div:hover { background-color: #f0f0f0; }
+
+        /* Popup Button Styles */
+        .popup-btn-container { margin-top:10px; display:flex; gap:5px; }
+        .popup-btn { padding: 3px 8px; font-size: 11px; }
+
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="search-box" class="ui-container">
+        <input type="text" id="coord-input" placeholder="Lat, Lng (e.g. -6.2, 106.8)">
+        <button onclick="handleSearch()">Go</button>
+    </div>
+
+    <div id="controls" class="ui-container">
+        <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
+    </div>
+
+    <div id="context-menu">
+        <div onclick="openModal('add')">Add new places</div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modal-title">Add New Place</div>
+            <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
+            
+            <div class="form-group">
+                <label>Label / Name</label>
+                <input type="text" id="place-label" placeholder="e.g. My Favorite Cafe">
+            </div>
+            
+            <div class="form-group">
+                <label>Icon (Emoji)</label>
+                <input type="text" id="place-emoji" placeholder="📍" value="📍">
+                <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="savePlace()">Save</button>
+            </div>
+            
+            <div style="margin-top:10px; text-align: right;">
+                 <button id="btn-delete-single" class="danger" style="display:none; width:100%" onclick="deleteSinglePlace()">Delete Marker</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Init Map
+        const map = L.map('map').setView([26.86,46.27], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+        let searchMarker = null;
+        let savedMarkers = [];
+        let contextMenuTargetLatLng = null;
+
+        // --- Local Storage ---
+        function loadFromStorage() {
+            //const data = localStorage.getItem('myMapMarkers');
+            const data = `
+                [
+    {
+        "id": "1769263192258",
+        "lat": 25.108758265475853,
+        "lng": 51.319911499910475,
+        "label": "Al Udeid",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772272408018",
+        "lat": 35.69648639524642,
+        "lng": 51.37867705267656,
+        "label": "Jomhouri Square",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772272427762",
+        "lat": 35.68635855798166,
+        "lng": 51.41034096795649,
+        "label": "Hassan Abad Square",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772274489892",
+        "lat": 32.66489001822884,
+        "lng": 51.68050277707848,
+        "label": "Isfahan",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772274517867",
+        "lat": 34.64595310632098,
+        "lng": 50.870938350423735,
+        "label": "Qom",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772274546292",
+        "lat": 35.834396109283034,
+        "lng": 50.96841568172101,
+        "label": "Karaj",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772274576331",
+        "lat": 34.34251403110483,
+        "lng": 47.10256861665315,
+        "label": "Kermanshah",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772426038808",
+        "lat": 38.053537333939495,
+        "lng": 46.3366929615737,
+        "label": "Tabriz",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772426387132",
+        "lat": 25.27500403251743,
+        "lng": 51.53911722762664,
+        "label": "Doha",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772445550695",
+        "lat": 25.358365460994204,
+        "lng": 60.400604658052146,
+        "label": "Kenarak",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772445619036",
+        "lat": 34.80002747038264,
+        "lng": 46.94222067667089,
+        "label": "Kamyaran",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772445862795",
+        "lat": 35.7358644876163,
+        "lng": 51.5022986729957,
+        "label": "Narmak",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772445903247",
+        "lat": 35.68972538944807,
+        "lng": 51.4010073073578,
+        "label": "Presidential Office",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772513857320",
+        "lat": 27.140940797637185,
+        "lng": 57.07938177560445,
+        "label": "Minab",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772530142772",
+        "lat": 31.902262825718797,
+        "lng": 35.95381514808099,
+        "label": "Jordan",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772533225047",
+        "lat": 25.109802582325813,
+        "lng": 55.14138357286628,
+        "label": "Fairmont The Palm Hotel (Dubai, UAE)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772533705956",
+        "lat": 29.240329059046715,
+        "lng": 47.971169181478864,
+        "label": "Kuwait International Airport",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772533776939",
+        "lat": 29.341807078126045,
+        "lng": 47.55145250250775,
+        "label": "Ali Al-Salem Airbase",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772534843223",
+        "lat": 25.069798910206032,
+        "lng": 55.13744001557351,
+        "label": "Sheikh Zayed Road",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772535269509",
+        "lat": 36.19785528854008,
+        "lng": 44.01913020291224,
+        "label": "Erbil",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772535905350",
+        "lat": 28.934755495034874,
+        "lng": 50.84222452301863,
+        "label": "Bushehr",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772598065904",
+        "lat": 36.67755511685367,
+        "lng": 46.568684580440284,
+        "label": "Shahin Dezh",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772702242266",
+        "lat": 25.02275518477051,
+        "lng": 55.039891564517795,
+        "label": "Jebel Ali Port",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772702273343",
+        "lat": 24.4497309547852,
+        "lng": 54.64470163749074,
+        "label": "Zayed International Airport",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772703032089",
+        "lat": 36.104135676739205,
+        "lng": 44.630147523336454,
+        "label": "Kurdistan Region",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772703077725",
+        "lat": 26.221688947590103,
+        "lng": 50.59233905751983,
+        "label": "Manama",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772704073546",
+        "lat": 26.20829554646344,
+        "lng": 56.247490637749934,
+        "label": "Khasab",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772704120096",
+        "lat": 32.110328614051724,
+        "lng": 34.807033159940296,
+        "label": "Tel Aviv",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772704206285",
+        "lat": 19.659653397640426,
+        "lng": 57.71542239969542,
+        "label": "Duqm",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772704581715",
+        "lat": 31.721893141796446,
+        "lng": 34.986300860966374,
+        "label": "Beit Shemesh",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772705571803",
+        "lat": 24.489648077028683,
+        "lng": 54.39193725585938,
+        "label": "Abu Dhabi",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772706152856",
+        "lat": 25.238176281782778,
+        "lng": 60.57190932705782,
+        "label": "Chah Bahar",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772767190552",
+        "lat": 34.58307867453125,
+        "lng": 32.98305194583677,
+        "label": "RAF Akrotiri",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772767603042",
+        "lat": 33.85351487049616,
+        "lng": 35.5116500312339,
+        "label": "Dahieh",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772767954158",
+        "lat": 33.281430933169204,
+        "lng": 35.39680970691885,
+        "label": "Sarifa",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772767973626",
+        "lat": 33.28351158786498,
+        "lng": 35.3477180230234,
+        "label": "Maaroub",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768002811",
+        "lat": 33.25359255479348,
+        "lng": 35.381424017512074,
+        "label": "Selaa (Tyre)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768028466",
+        "lat": 33.249746826085364,
+        "lng": 35.3488335748002,
+        "label": "Debaal",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768052386",
+        "lat": 33.26211850225033,
+        "lng": 35.36700549604831,
+        "label": "Bafliyeh",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768083586",
+        "lat": 33.272576077849486,
+        "lng": 35.35219380251335,
+        "label": "Barish",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768104809",
+        "lat": 33.28277626660276,
+        "lng": 35.378134412873486,
+        "label": "Arzoun",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768128569",
+        "lat": 34.19808355227897,
+        "lng": 36.227495972739234,
+        "label": "Qlayleh",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772768208721",
+        "lat": 33.280739276704644,
+        "lng": 35.37063012318997,
+        "label": "Dardghaya",
+        "emoji": "💥"
+    },
+    {
+        "id": "1772769579895",
+        "lat": 39.20433258139605,
+        "lng": 45.395165996113704,
+        "label": "Nakhchivan ",
+        "emoji": "💥"
+    }
+]
+            `
+            if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
+        }
+
+        function saveToStorage(placesArray) {
+            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+        }
+
+        function getPlacesData() {
+            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+        }
+
+        // --- Search ---
+        function handleSearch() {
+            const input = document.getElementById('coord-input').value;
+            const parts = input.split(',');
+            if (parts.length !== 2) { alert("Format: Lat, Lng"); return; }
+            
+            const lat = parseFloat(parts[0].trim());
+            const lng = parseFloat(parts[1].trim());
+            if (isNaN(lat) || isNaN(lng)) { alert("Invalid coords"); return; }
+
+            if (searchMarker) map.removeLayer(searchMarker);
+            searchMarker = L.marker([lat, lng]).addTo(map);
+            
+            // Popup with 2 buttons and helper text
+            const popupContent = `
+                <div>
+                    <strong>Search Result</strong><br>${lat}, ${lng}
+                    <div class="popup-btn-container">
+                        <button onclick="removeSearchMarker()" class="danger popup-btn">Close</button>
+                        <button onclick="addFromSearch(${lat}, ${lng})" class="popup-btn">Add Place</button>
+                    </div>
+                    <div style="margin-top:5px; font-size:10px; color:#666; font-style:italic;">
+                        Or right-click to add place
+                    </div>
+                </div>
+            `;
+
+            searchMarker.bindPopup(popupContent).openPopup();
+
+            // Right click functionality on the marker itself
+            searchMarker.on('contextmenu', function(e) { showContextMenu(e, lat, lng); });
+            map.flyTo([lat, lng], 15);
+        }
+
+        function removeSearchMarker() {
+            if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+        }
+
+        function addFromSearch(lat, lng) {
+            // Set the target coordinates then open modal
+            contextMenuTargetLatLng = { lat, lng };
+            openModal('add');
+        }
+
+        // --- Context Menu ---
+        const contextMenu = document.getElementById('context-menu');
+        
+        function showContextMenu(e, lat, lng) {
+            contextMenuTargetLatLng = { lat, lng };
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.containerPoint.x + 'px';
+            contextMenu.style.top = e.containerPoint.y + 'px';
+        }
+
+        map.on('contextmenu', (e) => {
+            showContextMenu(e, e.latlng.lat, e.latlng.lng);
+        });
+
+        map.on('click', () => { contextMenu.style.display = 'none'; });
+
+        // --- CRUD Modal ---
+        function openModal(mode, placeData = null) {
+            contextMenu.style.display = 'none';
+            const modal = document.getElementById('modal');
+            const title = document.getElementById('modal-title');
+            const delBtn = document.getElementById('btn-delete-single');
+
+            if (mode === 'add') {
+                title.innerText = "Add New Place";
+                document.getElementById('place-label').value = "";
+                document.getElementById('place-emoji').value = "📍";
+                document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
+                document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
+                document.getElementById('current-id').value = Date.now();
+                delBtn.style.display = "none";
+            } else {
+                title.innerText = "Edit Place";
+                document.getElementById('place-label').value = placeData.label;
+                document.getElementById('place-emoji').value = placeData.emoji;
+                document.getElementById('current-lat').value = placeData.lat;
+                document.getElementById('current-lng').value = placeData.lng;
+                document.getElementById('current-id').value = placeData.id;
+                delBtn.style.display = "block";
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        function savePlace() {
+            const id = document.getElementById('current-id').value;
+            const lat = parseFloat(document.getElementById('current-lat').value);
+            const lng = parseFloat(document.getElementById('current-lng').value);
+            const label = document.getElementById('place-label').value;
+            const emoji = document.getElementById('place-emoji').value || "📍";
+
+            if (!label) { alert("Label required"); return; }
+
+            const places = getPlacesData();
+            const index = places.findIndex(p => p.id == id);
+            const newPlace = { id, lat, lng, label, emoji };
+
+            if (index > -1) {
+                places[index] = newPlace;
+                const existing = savedMarkers.find(m => m.options.placeId == id);
+                if(existing) map.removeLayer(existing);
+            } else {
+                places.push(newPlace);
+                removeSearchMarker(); // Close search marker if adding new
+            }
+
+            saveToStorage(places);
+            createSavedMarker(newPlace);
+            closeModal();
+        }
+
+        function deleteSinglePlace() {
+            const id = document.getElementById('current-id').value;
+            if(!confirm("Delete this marker?")) return;
+            const places = getPlacesData().filter(p => p.id != id);
+            saveToStorage(places);
+            const marker = savedMarkers.find(m => m.options.placeId == id);
+            if (marker) map.removeLayer(marker);
+            savedMarkers = savedMarkers.filter(m => m.options.placeId != id);
+            closeModal();
+        }
+
+        function clearAllMarkers() {
+            if(!confirm("Delete ALL markers?")) return;
+            localStorage.removeItem('myMapMarkers');
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+        }
+
+        // --- Render ---
+        function createSavedMarker(placeData) {
+            const emojiIcon = L.divIcon({
+                className: 'emoji-marker',
+                html: `<div>${placeData.emoji}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([placeData.lat, placeData.lng], {
+                icon: emojiIcon,
+                placeId: placeData.id
+            }).addTo(map);
+
+            marker.bindTooltip(placeData.label, { 
+                permanent: true,       
+                direction: 'bottom',   
+                className: 'custom-label', 
+                offset: [0, 10]        
+            });
+
+            marker.on('click', () => { openModal('edit', placeData); });
+            savedMarkers.push(marker);
+        }
+
+        loadFromStorage();
+        document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
+
+    </script>
+</body>
+</html>
