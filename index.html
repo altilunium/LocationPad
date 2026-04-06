@@ -20,12 +20,12 @@
             position: absolute;
             z-index: 1000;
             background: rgba(255, 255, 255, 0.9);
-            padding: 10px;
-            border-radius: 8px;
+            padding: 8px;
+            border-radius: 6px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
             backdrop-filter: blur(5px);
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
         }
 
@@ -35,18 +35,55 @@
             left: 50px;
         }
 
-        /* Canvas Manager */
-        #canvas-manager {
+        /* Menu Wrapper & Hamburger */
+        #menu-wrapper {
+            position: absolute;
             top: 20px;
             right: 20px;
-            padding: 8px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 5px;
+        }
+
+        #hamburger-btn {
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            color: #333;
+            backdrop-filter: blur(5px);
+        }
+        
+        #hamburger-btn:hover {
+            background: #f0f0f0;
+        }
+
+        /* Canvas Manager Dropdown */
+        #canvas-manager {
+            position: relative;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
+        }
+        
+        .btn-row {
+            display: flex;
+            gap: 4px;
+            justify-content: space-between;
         }
         
         #canvas-select {
             padding: 6px;
             border-radius: 4px;
             border: 1px solid #ccc;
-            max-width: 150px;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .icon-btn {
@@ -173,14 +210,20 @@
         <button onclick="handleSearch()">Go</button>
     </div>
 
-    <div id="canvas-manager" class="ui-container">
-        <select id="canvas-select" onchange="switchCanvas(this.value)"></select>
-        <button class="icon-btn" onclick="createCanvas()" title="New Canvas">➕</button>
-        <button class="icon-btn" onclick="renameCanvas()" title="Rename Canvas">✏️</button>
-        <button class="icon-btn danger" onclick="deleteCanvas()" title="Delete Canvas">🗑️</button>
-        <button class="icon-btn" style="background:#28a745" onclick="exportCanvas()" title="Export to JSON">📤</button>
-        <button class="icon-btn" style="background:#17a2b8" onclick="document.getElementById('import-file').click()" title="Import from JSON">📥</button>
-        <input type="file" id="import-file" style="display:none" accept=".json" onchange="importCanvas(event)">
+    <div id="menu-wrapper">
+        <button id="hamburger-btn" onclick="toggleCanvasMenu()" title="Canvas Menu">☰</button>
+        
+        <div id="canvas-manager" class="ui-container">
+            <select id="canvas-select" onchange="switchCanvas(this.value)"></select>
+            <div class="btn-row">
+                <button class="icon-btn" onclick="createCanvas()" title="New Canvas">➕</button>
+                <button class="icon-btn" onclick="renameCanvas()" title="Rename Canvas">✏️</button>
+                <button class="icon-btn danger" onclick="deleteCanvas()" title="Delete Canvas">🗑️</button>
+                <button class="icon-btn" style="background:#28a745" onclick="exportCanvas()" title="Export to JSON">📤</button>
+                <button class="icon-btn" style="background:#17a2b8" onclick="document.getElementById('import-file').click()" title="Import from JSON">📥</button>
+            </div>
+            <input type="file" id="import-file" style="display:none" accept=".json" onchange="importCanvas(event)">
+        </div>
     </div>
 
     <div id="controls" class="ui-container">
@@ -234,6 +277,18 @@
         let savedMarkers = [];
         let contextMenuTargetLatLng = null;
 
+        // --- UI Toggles ---
+        function toggleCanvasMenu() {
+            const menu = document.getElementById('canvas-manager');
+            menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        // Close menu if clicked outside
+        map.on('click', () => { 
+            document.getElementById('canvas-manager').style.display = 'none'; 
+            contextMenu.style.display = 'none'; 
+        });
+
         // --- Canvas Management State ---
         let canvases = [];
         let activeCanvasId = null;
@@ -252,7 +307,6 @@
                 const legacyData = localStorage.getItem('myMapMarkers');
                 if (legacyData) {
                     localStorage.setItem(`canvas_data_${defaultId}`, legacyData);
-                    // localStorage.removeItem('myMapMarkers'); // Optional: cleanup old key
                 }
                 saveCanvasState();
             }
@@ -363,7 +417,7 @@
                 } catch (err) {
                     alert("Failed to import. The file is not a valid JSON array of markers.");
                 }
-                event.target.value = ''; // Reset input so the same file can be loaded again if needed
+                event.target.value = ''; // Reset input
             };
             reader.readAsText(file);
         }
@@ -439,8 +493,6 @@
         map.on('contextmenu', (e) => {
             showContextMenu(e, e.latlng.lat, e.latlng.lng);
         });
-
-        map.on('click', () => { contextMenu.style.display = 'none'; });
 
         // --- CRUD Modal ---
         function openModal(mode, placeData = null) {
@@ -554,9 +606,9 @@
             e.preventDefault();
             const controls = document.querySelector('#controls');
             const searchBox = document.querySelector('#search-box');
-            const canvasManager = document.querySelector('#canvas-manager');
+            const menuWrapper = document.querySelector('#menu-wrapper');
 
-            [controls, searchBox, canvasManager].forEach(el => {
+            [controls, searchBox, menuWrapper].forEach(el => {
               if (!el) return;
               el.style.display = el.style.display === 'none' ? '' : 'none';
             });
