@@ -14,5 +14,6 @@ To add a new place, either paste the coordinates or right-click on the map (tap 
 
 
 ## Developer blog
+* v26.4.6 : This update introduces a more flexible workspace system by allowing users to create, edit, delete, and switch between multiple “canvas” environments. Each canvas now operates with its own independent database, making it easier to separate and manage different datasets or projects. The canvas manager behavior has also been refined. When the Ctrl + . shortcut is triggered, the canvas manager will now be properly hidden to ensure a cleaner interface and avoid visual clutter during use. Interaction with markers has been improved as well. Clicking on a marker will now display its precise coordinates, providing clearer spatial information directly within the interface. Finally, data portability has been expanded. Each canvas now includes an “Export to JSON” option, allowing users to easily back up or share their data. In addition, a new “Import from JSON” feature enables users to load a JSON file into a newly created canvas, simplifying data transfer and reuse across environments.
 * v26.1.25 : Press Ctrl+. to toggle the visibility of UI elements.
 * v26.1.8 : "[A trip to the Ragunan Zoo](https://www.openstreetmap.org/user/rphyrin/diary/408054)"
