@@ -62,7 +62,7 @@
         }
 
         /* Modal Styles */
-        #modal {
+        #modal, #canvas-modal {
             display: none;
             position: fixed;
             z-index: 2000;
@@ -144,6 +144,12 @@
         <button onclick="handleSearch()">Go</button>
     </div>
 
+    <div id="canvas-selector" class="ui-container" style="top: 20px; right: 20px;">
+        <label for="canvas-select">Canvas:</label>
+        <select id="canvas-select" onchange="switchCanvas()"></select>
+        <button onclick="openCanvasModal()">Manage</button>
+    </div>
+
     <div id="controls" class="ui-container">
         <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
     </div>
@@ -168,6 +174,11 @@
                 <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
             </div>
             
+            <div class="form-group">
+                <label>Coordinates</label>
+                <input type="text" id="place-coords" readonly>
+            </div>
+            
             <div class="modal-actions">
                 <button class="btn-secondary" onclick="closeModal()">Cancel</button>
                 <button onclick="savePlace()">Save</button>
@@ -175,6 +186,21 @@
             
             <div style="margin-top:10px; text-align: right;">
                  <button id="btn-delete-single" class="danger" style="display:none; width:100%" onclick="deleteSinglePlace()">Delete Marker</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="canvas-modal">
+        <div class="modal-content">
+            <div class="modal-header">Manage Canvases</div>
+            <div class="form-group">
+                <label>New Canvas Name</label>
+                <input type="text" id="new-canvas-name" placeholder="Enter canvas name">
+                <button onclick="createCanvas()">Create</button>
+            </div>
+            <div id="canvas-list"></div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeCanvasModal()">Close</button>
             </div>
         </div>
     </div>
@@ -189,19 +215,150 @@
         let searchMarker = null;
         let savedMarkers = [];
         let contextMenuTargetLatLng = null;
+        let currentCanvas = 'main';
+        let canvases = ['main'];
 
         // --- Local Storage ---
+        function getStorageKey(canvas = currentCanvas) {
+            return 'canvas_' + canvas;
+        }
+
         function loadFromStorage() {
-            const data = localStorage.getItem('myMapMarkers');
+            const data = localStorage.getItem(getStorageKey());
             if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
         }
 
         function saveToStorage(placesArray) {
-            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+            localStorage.setItem(getStorageKey(), JSON.stringify(placesArray));
         }
 
         function getPlacesData() {
-            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+            return JSON.parse(localStorage.getItem(getStorageKey()) || "[]");
+        }
+
+        // --- Canvas Management ---
+        function initCanvases() {
+            // Backward compatibility: if old data exists, move to 'main'
+            if (localStorage.getItem('myMapMarkers') && !localStorage.getItem('canvas_main')) {
+                localStorage.setItem('canvas_main', localStorage.getItem('myMapMarkers'));
+                localStorage.removeItem('myMapMarkers');
+            }
+            // Load canvases list
+            canvases = JSON.parse(localStorage.getItem('canvases')) || ['main'];
+            if (!canvases.includes('main')) canvases.unshift('main');
+            localStorage.setItem('canvases', JSON.stringify(canvases));
+            // Set current canvas
+            currentCanvas = localStorage.getItem('currentCanvas') || 'main';
+            updateCanvasSelector();
+        }
+
+        function updateCanvasSelector() {
+            const select = document.getElementById('canvas-select');
+            select.innerHTML = '';
+            canvases.forEach(canvas => {
+                const option = document.createElement('option');
+                option.value = canvas;
+                option.textContent = canvas;
+                if (canvas === currentCanvas) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        function switchCanvas() {
+            const select = document.getElementById('canvas-select');
+            const newCanvas = select.value;
+            switchToCanvas(newCanvas);
+        }
+
+        function openCanvasModal() {
+            document.getElementById('canvas-modal').style.display = 'flex';
+            updateCanvasList();
+        }
+
+        function closeCanvasModal() {
+            document.getElementById('canvas-modal').style.display = 'none';
+        }
+
+        function createCanvas() {
+            const name = document.getElementById('new-canvas-name').value.trim();
+            if (!name || canvases.includes(name)) {
+                alert('Invalid or duplicate name');
+                return;
+            }
+            canvases.push(name);
+            localStorage.setItem('canvases', JSON.stringify(canvases));
+            document.getElementById('new-canvas-name').value = '';
+            updateCanvasSelector();
+            updateCanvasList();
+            // Switch to new canvas
+            switchToCanvas(name);
+        }
+
+        function switchToCanvas(name) {
+            if (name === currentCanvas) return;
+            // Clear current markers
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+            // Switch
+            currentCanvas = name;
+            localStorage.setItem('currentCanvas', currentCanvas);
+            document.getElementById('canvas-select').value = currentCanvas;
+            loadFromStorage();
+        }
+
+        function updateCanvasList() {
+            const list = document.getElementById('canvas-list');
+            list.innerHTML = '';
+            canvases.forEach(canvas => {
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.justifyContent = 'space-between';
+                div.style.marginBottom = '5px';
+                div.innerHTML = `<span>${canvas}</span>`;
+                if (canvas !== 'main') {
+                    const renameBtn = document.createElement('button');
+                    renameBtn.textContent = 'Rename';
+                    renameBtn.onclick = () => renameCanvas(canvas);
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = 'Delete';
+                    deleteBtn.className = 'danger';
+                    deleteBtn.onclick = () => deleteCanvas(canvas);
+                    div.appendChild(renameBtn);
+                    div.appendChild(deleteBtn);
+                }
+                list.appendChild(div);
+            });
+        }
+
+        function renameCanvas(oldName) {
+            const newName = prompt('New name:', oldName);
+            if (!newName || newName === oldName || canvases.includes(newName)) return;
+            const index = canvases.indexOf(oldName);
+            canvases[index] = newName;
+            localStorage.setItem('canvases', JSON.stringify(canvases));
+            // Move data
+            const data = localStorage.getItem('canvas_' + oldName);
+            if (data) {
+                localStorage.setItem('canvas_' + newName, data);
+                localStorage.removeItem('canvas_' + oldName);
+            }
+            if (currentCanvas === oldName) {
+                switchToCanvas(newName);
+            }
+            updateCanvasSelector();
+            updateCanvasList();
+        }
+
+        function deleteCanvas(name) {
+            if (!confirm(`Delete canvas "${name}" and all its data?`)) return;
+            canvases = canvases.filter(c => c !== name);
+            localStorage.setItem('canvases', JSON.stringify(canvases));
+            localStorage.removeItem('canvas_' + name);
+            if (currentCanvas === name) {
+                switchToCanvas('main');
+            }
+            updateCanvasSelector();
+            updateCanvasList();
         }
 
         // --- Search ---
@@ -278,6 +435,7 @@
                 document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
                 document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
                 document.getElementById('current-id').value = Date.now();
+                document.getElementById('place-coords').value = `${contextMenuTargetLatLng.lat}, ${contextMenuTargetLatLng.lng}`;
                 delBtn.style.display = "none";
             } else {
                 title.innerText = "Edit Place";
@@ -286,6 +444,7 @@
                 document.getElementById('current-lat').value = placeData.lat;
                 document.getElementById('current-lng').value = placeData.lng;
                 document.getElementById('current-id').value = placeData.id;
+                document.getElementById('place-coords').value = `${placeData.lat}, ${placeData.lng}`;
                 delBtn.style.display = "block";
             }
             modal.style.display = 'flex';
@@ -332,8 +491,8 @@
         }
 
         function clearAllMarkers() {
-            if(!confirm("Delete ALL markers?")) return;
-            localStorage.removeItem('myMapMarkers');
+            if(!confirm("Delete ALL markers in current canvas?")) return;
+            localStorage.removeItem(getStorageKey());
             savedMarkers.forEach(m => map.removeLayer(m));
             savedMarkers = [];
         }
@@ -366,6 +525,8 @@
         loadFromStorage();
         document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
 
+        initCanvases();
+
 
 document.addEventListener('keydown', function (e) {
   if (e.ctrlKey && e.key === '.') {
@@ -374,8 +535,9 @@ document.addEventListener('keydown', function (e) {
 
      const controls = document.querySelector('#controls');
     const searchBox = document.querySelector('#search-box');
+    const canvasSelector = document.querySelector('#canvas-selector');
 
-    [controls, searchBox].forEach(el => {
+    [controls, searchBox, canvasSelector].forEach(el => {
       if (!el) return;
       el.style.display = el.style.display === 'none' ? '' : 'none';
     });
