@@ -24,14 +24,34 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
             backdrop-filter: blur(5px);
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
 
         /* Search Bar */
         #search-box {
             top: 20px;
             left: 50px;
-            display: flex;
-            gap: 10px;
+        }
+
+        /* Canvas Manager */
+        #canvas-manager {
+            top: 20px;
+            right: 20px;
+            padding: 8px;
+        }
+        
+        #canvas-select {
+            padding: 6px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            max-width: 150px;
+        }
+
+        .icon-btn {
+            padding: 6px 8px;
+            font-size: 14px;
         }
 
         input[type="text"] {
@@ -77,16 +97,25 @@
             background-color: white;
             padding: 20px;
             border-radius: 8px;
-            width: 300px;
+            width: 320px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
 
         .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
         .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; font-weight: bold; }
         .form-group input { width: 100%; box-sizing: border-box; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
         .btn-secondary { background: #6c757d; }
+
+        /* Coordinate Display in Modal */
+        #display-coords {
+            background: #f4f4f4;
+            color: #333;
+            font-family: monospace;
+            border: 1px solid #ddd;
+            cursor: text;
+        }
 
         /* Emoji Icon Style */
         .emoji-marker {
@@ -144,8 +173,18 @@
         <button onclick="handleSearch()">Go</button>
     </div>
 
+    <div id="canvas-manager" class="ui-container">
+        <select id="canvas-select" onchange="switchCanvas(this.value)"></select>
+        <button class="icon-btn" onclick="createCanvas()" title="New Canvas">➕</button>
+        <button class="icon-btn" onclick="renameCanvas()" title="Rename Canvas">✏️</button>
+        <button class="icon-btn danger" onclick="deleteCanvas()" title="Delete Canvas">🗑️</button>
+        <button class="icon-btn" style="background:#28a745" onclick="exportCanvas()" title="Export to JSON">📤</button>
+        <button class="icon-btn" style="background:#17a2b8" onclick="document.getElementById('import-file').click()" title="Import from JSON">📥</button>
+        <input type="file" id="import-file" style="display:none" accept=".json" onchange="importCanvas(event)">
+    </div>
+
     <div id="controls" class="ui-container">
-        <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
+        <button class="danger" onclick="clearAllMarkers()">Delete All in Canvas</button>
     </div>
 
     <div id="context-menu">
@@ -157,6 +196,11 @@
             <div class="modal-header" id="modal-title">Add New Place</div>
             <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
             
+            <div class="form-group">
+                <label>Coordinates</label>
+                <input type="text" id="display-coords" readonly>
+            </div>
+
             <div class="form-group">
                 <label>Label / Name</label>
                 <input type="text" id="place-label" placeholder="e.g. My Favorite Cafe">
@@ -184,24 +228,162 @@
     <script>
         // Init Map
         const map = L.map('map').setView([-6.200000, 106.816666], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
 
         let searchMarker = null;
         let savedMarkers = [];
         let contextMenuTargetLatLng = null;
 
-        // --- Local Storage ---
+        // --- Canvas Management State ---
+        let canvases = [];
+        let activeCanvasId = null;
+
+        function initCanvases() {
+            const storedCanvases = localStorage.getItem('locationpad_canvases');
+            if (storedCanvases) {
+                canvases = JSON.parse(storedCanvases);
+                activeCanvasId = localStorage.getItem('locationpad_active_canvas') || canvases[0].id;
+            } else {
+                // First time setup & Migration from old storage key
+                const defaultId = 'c_' + Date.now();
+                canvases = [{ id: defaultId, name: 'Default Canvas' }];
+                activeCanvasId = defaultId;
+                
+                const legacyData = localStorage.getItem('myMapMarkers');
+                if (legacyData) {
+                    localStorage.setItem(`canvas_data_${defaultId}`, legacyData);
+                    // localStorage.removeItem('myMapMarkers'); // Optional: cleanup old key
+                }
+                saveCanvasState();
+            }
+            renderCanvasDropdown();
+            loadFromStorage();
+        }
+
+        function saveCanvasState() {
+            localStorage.setItem('locationpad_canvases', JSON.stringify(canvases));
+            localStorage.setItem('locationpad_active_canvas', activeCanvasId);
+        }
+
+        function renderCanvasDropdown() {
+            const select = document.getElementById('canvas-select');
+            select.innerHTML = '';
+            canvases.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.innerText = c.name;
+                if (c.id === activeCanvasId) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function switchCanvas(id) {
+            activeCanvasId = id;
+            saveCanvasState();
+            removeSearchMarker();
+            
+            // Clear current map markers
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+            
+            loadFromStorage();
+        }
+
+        function createCanvas() {
+            const name = prompt("Enter new canvas name:", "New Canvas");
+            if (!name) return;
+            const newId = 'c_' + Date.now();
+            canvases.push({ id: newId, name });
+            saveCanvasState();
+            renderCanvasDropdown();
+            document.getElementById('canvas-select').value = newId;
+            switchCanvas(newId);
+        }
+
+        function renameCanvas() {
+            const currentCanvas = canvases.find(c => c.id === activeCanvasId);
+            const newName = prompt("Rename canvas to:", currentCanvas.name);
+            if (!newName || newName === currentCanvas.name) return;
+            currentCanvas.name = newName;
+            saveCanvasState();
+            renderCanvasDropdown();
+        }
+
+        function deleteCanvas() {
+            if (canvases.length <= 1) {
+                alert("You cannot delete the last remaining canvas.");
+                return;
+            }
+            if (!confirm("Are you sure you want to delete this entire canvas and its markers?")) return;
+            
+            localStorage.removeItem(`canvas_data_${activeCanvasId}`);
+            canvases = canvases.filter(c => c.id !== activeCanvasId);
+            activeCanvasId = canvases[0].id;
+            
+            saveCanvasState();
+            renderCanvasDropdown();
+            switchCanvas(activeCanvasId);
+        }
+
+        function exportCanvas() {
+            const dataStr = JSON.stringify(getPlacesData(), null, 2);
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            const currentCanvas = canvases.find(c => c.id === activeCanvasId);
+            a.href = url;
+            a.download = `${currentCanvas.name.replace(/\s+/g, '_')}_export.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importCanvas(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (!Array.isArray(data)) throw new Error("Invalid format");
+
+                    let name = prompt("Enter a name for the imported canvas:", file.name.replace('.json', ''));
+                    if (!name) name = "Imported Canvas";
+
+                    const newId = 'c_' + Date.now();
+                    canvases.push({ id: newId, name });
+                    
+                    localStorage.setItem(`canvas_data_${newId}`, JSON.stringify(data));
+                    saveCanvasState();
+                    renderCanvasDropdown();
+                    document.getElementById('canvas-select').value = newId;
+                    switchCanvas(newId);
+                    
+                } catch (err) {
+                    alert("Failed to import. The file is not a valid JSON array of markers.");
+                }
+                event.target.value = ''; // Reset input so the same file can be loaded again if needed
+            };
+            reader.readAsText(file);
+        }
+
+        // --- Local Storage (Canvas specific) ---
+        function getStorageKey() {
+            return `canvas_data_${activeCanvasId}`;
+        }
+
         function loadFromStorage() {
-            const data = localStorage.getItem('myMapMarkers');
+            const data = localStorage.getItem(getStorageKey());
             if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
         }
 
         function saveToStorage(placesArray) {
-            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+            localStorage.setItem(getStorageKey(), JSON.stringify(placesArray));
         }
 
         function getPlacesData() {
-            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+            return JSON.parse(localStorage.getItem(getStorageKey()) || "[]");
         }
 
         // --- Search ---
@@ -217,7 +399,6 @@
             if (searchMarker) map.removeLayer(searchMarker);
             searchMarker = L.marker([lat, lng]).addTo(map);
             
-            // Popup with 2 buttons and helper text
             const popupContent = `
                 <div>
                     <strong>Search Result</strong><br>${lat}, ${lng}
@@ -232,8 +413,6 @@
             `;
 
             searchMarker.bindPopup(popupContent).openPopup();
-
-            // Right click functionality on the marker itself
             searchMarker.on('contextmenu', function(e) { showContextMenu(e, lat, lng); });
             map.flyTo([lat, lng], 15);
         }
@@ -243,7 +422,6 @@
         }
 
         function addFromSearch(lat, lng) {
-            // Set the target coordinates then open modal
             contextMenuTargetLatLng = { lat, lng };
             openModal('add');
         }
@@ -270,6 +448,7 @@
             const modal = document.getElementById('modal');
             const title = document.getElementById('modal-title');
             const delBtn = document.getElementById('btn-delete-single');
+            const coordsDisplay = document.getElementById('display-coords');
 
             if (mode === 'add') {
                 title.innerText = "Add New Place";
@@ -278,6 +457,7 @@
                 document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
                 document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
                 document.getElementById('current-id').value = Date.now();
+                coordsDisplay.value = `${contextMenuTargetLatLng.lat.toFixed(5)}, ${contextMenuTargetLatLng.lng.toFixed(5)}`;
                 delBtn.style.display = "none";
             } else {
                 title.innerText = "Edit Place";
@@ -286,6 +466,7 @@
                 document.getElementById('current-lat').value = placeData.lat;
                 document.getElementById('current-lng').value = placeData.lng;
                 document.getElementById('current-id').value = placeData.id;
+                coordsDisplay.value = `${placeData.lat.toFixed(5)}, ${placeData.lng.toFixed(5)}`;
                 delBtn.style.display = "block";
             }
             modal.style.display = 'flex';
@@ -312,7 +493,7 @@
                 if(existing) map.removeLayer(existing);
             } else {
                 places.push(newPlace);
-                removeSearchMarker(); // Close search marker if adding new
+                removeSearchMarker(); 
             }
 
             saveToStorage(places);
@@ -332,8 +513,8 @@
         }
 
         function clearAllMarkers() {
-            if(!confirm("Delete ALL markers?")) return;
-            localStorage.removeItem('myMapMarkers');
+            if(!confirm("Delete ALL markers in this canvas?")) return;
+            localStorage.removeItem(getStorageKey());
             savedMarkers.forEach(m => map.removeLayer(m));
             savedMarkers = [];
         }
@@ -363,27 +544,24 @@
             savedMarkers.push(marker);
         }
 
-        loadFromStorage();
+        // Bootstrap App
+        initCanvases();
+        
         document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
 
+        document.addEventListener('keydown', function (e) {
+          if (e.ctrlKey && e.key === '.') {
+            e.preventDefault();
+            const controls = document.querySelector('#controls');
+            const searchBox = document.querySelector('#search-box');
+            const canvasManager = document.querySelector('#canvas-manager');
 
-document.addEventListener('keydown', function (e) {
-  if (e.ctrlKey && e.key === '.') {
-    e.preventDefault();
-    console.log("nya")
-
-     const controls = document.querySelector('#controls');
-    const searchBox = document.querySelector('#search-box');
-
-    [controls, searchBox].forEach(el => {
-      if (!el) return;
-      el.style.display = el.style.display === 'none' ? '' : 'none';
-    });
-  
-  }
-});
-
-        
+            [controls, searchBox, canvasManager].forEach(el => {
+              if (!el) return;
+              el.style.display = el.style.display === 'none' ? '' : 'none';
+            });
+          }
+        });
 
     </script>
 </body>
