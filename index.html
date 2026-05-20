@@ -222,7 +222,7 @@
                 <button class="icon-btn" style="background:#28a745" onclick="exportCanvas()" title="Export to JSON">📤</button>
                 <button class="icon-btn" style="background:#17a2b8" onclick="document.getElementById('import-file').click()" title="Import from JSON">📥</button>
             </div>
-            <input type="file" id="import-file" style="display:none" accept=".json" onchange="importCanvas(event)">
+            <input type="file" id="import-file" style="display:none" accept=".geojson" onchange="importCanvas(event)">
         </div>
     </div>
 
@@ -379,48 +379,82 @@
             switchCanvas(activeCanvasId);
         }
 
+        
         function exportCanvas() {
-            const dataStr = JSON.stringify(getPlacesData(), null, 2);
-            const blob = new Blob([dataStr], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+    const rawData = getPlacesData();
+    
+    const geoJsonData = {
+        type: "FeatureCollection",
+        features: rawData.map(place => ({
+            type: "Feature",
+            geometry: {
+                type: "Point",
+                coordinates: [
+                    place.lng || place.longitude || 0, 
+                    place.lat || place.latitude || 0
+                ]
+            },
+            properties: { ...place }
+        }))
+    };
+
+    const dataStr = JSON.stringify(geoJsonData, null, 2);
+    const blob = new Blob([dataStr], { type: "application/geo+json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    const currentCanvas = canvases.find(c => c.id === activeCanvasId);
+    a.href = url;
+    a.download = `${currentCanvas.name.replace(/\s+/g, '_')}_export.geojson`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importCanvas(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const geoJson = JSON.parse(e.target.result);
             
-            const currentCanvas = canvases.find(c => c.id === activeCanvasId);
-            a.href = url;
-            a.download = `${currentCanvas.name.replace(/\s+/g, '_')}_export.json`;
-            a.click();
-            URL.revokeObjectURL(url);
+            if (geoJson.type !== "FeatureCollection" || !Array.isArray(geoJson.features)) {
+                throw new Error("Invalid format");
+            }
+
+            const data = geoJson.features.map(feature => {
+                const coords = feature.geometry ? feature.geometry.coordinates : [0, 0];
+                return {
+                    ...feature.properties,
+                    lng: coords[0],
+                    lat: coords[1]
+                };
+            });
+
+            let name = prompt("Enter a name for the imported canvas:", file.name.replace(/\.geojson|\.json/gi, ''));
+            if (!name) name = "Imported Canvas";
+
+            const newId = 'c_' + Date.now();
+            canvases.push({ id: newId, name });
+            
+            localStorage.setItem(`canvas_data_${newId}`, JSON.stringify(data));
+            saveCanvasState();
+            renderCanvasDropdown();
+            document.getElementById('canvas-select').value = newId;
+            switchCanvas(newId);
+            
+        } catch (err) {
+            alert("Failed to import. The file is not a valid GeoJSON FeatureCollection.");
         }
+        event.target.value = ''; 
+    };
+    reader.readAsText(file);
+}
 
-        function importCanvas(event) {
-            const file = event.target.files[0];
-            if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    if (!Array.isArray(data)) throw new Error("Invalid format");
 
-                    let name = prompt("Enter a name for the imported canvas:", file.name.replace('.json', ''));
-                    if (!name) name = "Imported Canvas";
 
-                    const newId = 'c_' + Date.now();
-                    canvases.push({ id: newId, name });
-                    
-                    localStorage.setItem(`canvas_data_${newId}`, JSON.stringify(data));
-                    saveCanvasState();
-                    renderCanvasDropdown();
-                    document.getElementById('canvas-select').value = newId;
-                    switchCanvas(newId);
-                    
-                } catch (err) {
-                    alert("Failed to import. The file is not a valid JSON array of markers.");
-                }
-                event.target.value = ''; // Reset input
-            };
-            reader.readAsText(file);
-        }
 
         // --- Local Storage (Canvas specific) ---
         function getStorageKey() {
