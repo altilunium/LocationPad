@@ -91,11 +91,18 @@
             font-size: 14px;
         }
 
-        input[type="text"] {
+        input[type="text"], textarea {
             padding: 8px;
             border: 1px solid #ccc;
             border-radius: 4px;
             width: 250px;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            width: 100%;
+            resize: vertical;
+            font-family: sans-serif;
         }
 
         button {
@@ -199,6 +206,34 @@
         .popup-btn-container { margin-top:10px; display:flex; gap:5px; }
         .popup-btn { padding: 3px 8px; font-size: 11px; }
 
+        /* Sidebar Styles */
+        #sidebar {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 350px;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            z-index: 1500;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.3);
+            display: none;
+            flex-direction: column;
+            padding: 25px 20px 20px 20px;
+            box-sizing: border-box;
+            backdrop-filter: blur(10px);
+        }
+        #sidebar-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .sidebar-title { font-size: 22px; font-weight: bold; margin-bottom: 5px; color: #333; margin-top: 15px; display: flex; align-items: center; gap: 8px; }
+        .sidebar-coords { font-family: monospace; color: #777; margin-bottom: 20px; font-size: 13px; }
+        .sidebar-desc { font-size: 14px; line-height: 1.6; color: #444; white-space: pre-wrap; word-break: break-word; background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e9ecef; flex-grow: 1; overflow-y: auto; margin-bottom: 20px; }
+        .sidebar-actions { display: flex; gap: 10px; }
+        .close-sidebar-btn { position: absolute; top: 10px; right: 15px; background: none; border: none; color: #888; font-size: 28px; cursor: pointer; padding: 0; line-height: 1; }
+        .close-sidebar-btn:hover { color: #333; }
+
     </style>
 </head>
 <body>
@@ -234,10 +269,15 @@
         <div onclick="openModal('add')">Add new places</div>
     </div>
 
+    <div id="sidebar">
+        <button class="close-sidebar-btn" onclick="closeSidebar()">×</button>
+        <div id="sidebar-content"></div>
+    </div>
+
     <div id="modal">
         <div class="modal-content">
             <div class="modal-header" id="modal-title">Add New Place</div>
-            <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
+            <input type="hidden" id="current-id"><input type="hidden" id="current-lat"><input type="hidden" id="current-lng">
             
             <div class="form-group">
                 <label>Coordinates</label>
@@ -253,6 +293,11 @@
                 <label>Icon (Emoji)</label>
                 <input type="text" id="place-emoji" placeholder="📍" value="📍">
                 <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
+            </div>
+
+            <div class="form-group">
+                <label>Description</label>
+                <textarea id="place-desc" rows="4" placeholder="Enter multi-line description details..."></textarea>
             </div>
             
             <div class="modal-actions">
@@ -276,6 +321,7 @@
         let searchMarker = null;
         let savedMarkers = [];
         let contextMenuTargetLatLng = null;
+        let activeSidebarPlaceId = null;
 
         // --- UI Toggles ---
         function toggleCanvasMenu() {
@@ -283,10 +329,11 @@
             menu.style.display = menu.style.display === 'flex' ? 'none' : 'flex';
         }
 
-        // Close menu if clicked outside
+        // Close UI widgets if clicked outside on the map
         map.on('click', () => { 
             document.getElementById('canvas-manager').style.display = 'none'; 
             contextMenu.style.display = 'none'; 
+            closeSidebar();
         });
 
         // --- Canvas Management State ---
@@ -299,7 +346,6 @@
                 canvases = JSON.parse(storedCanvases);
                 activeCanvasId = localStorage.getItem('locationpad_active_canvas') || canvases[0].id;
             } else {
-                // First time setup & Migration from old storage key
                 const defaultId = 'c_' + Date.now();
                 canvases = [{ id: defaultId, name: 'Default Canvas' }];
                 activeCanvasId = defaultId;
@@ -335,8 +381,8 @@
             activeCanvasId = id;
             saveCanvasState();
             removeSearchMarker();
+            closeSidebar();
             
-            // Clear current map markers
             savedMarkers.forEach(m => map.removeLayer(m));
             savedMarkers = [];
             
@@ -379,82 +425,77 @@
             switchCanvas(activeCanvasId);
         }
 
-        
         function exportCanvas() {
-    const rawData = getPlacesData();
-    
-    const geoJsonData = {
-        type: "FeatureCollection",
-        features: rawData.map(place => ({
-            type: "Feature",
-            geometry: {
-                type: "Point",
-                coordinates: [
-                    place.lng || place.longitude || 0, 
-                    place.lat || place.latitude || 0
-                ]
-            },
-            properties: { ...place }
-        }))
-    };
-
-    const dataStr = JSON.stringify(geoJsonData, null, 2);
-    const blob = new Blob([dataStr], { type: "application/geo+json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    
-    const currentCanvas = canvases.find(c => c.id === activeCanvasId);
-    a.href = url;
-    a.download = `${currentCanvas.name.replace(/\s+/g, '_')}_export.geojson`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function importCanvas(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const geoJson = JSON.parse(e.target.result);
+            const rawData = getPlacesData();
             
-            if (geoJson.type !== "FeatureCollection" || !Array.isArray(geoJson.features)) {
-                throw new Error("Invalid format");
-            }
+            const geoJsonData = {
+                type: "FeatureCollection",
+                features: rawData.map(place => ({
+                    type: "Feature",
+                    geometry: {
+                        type: "Point",
+                        coordinates: [
+                            place.lng || place.longitude || 0, 
+                            place.lat || place.latitude || 0
+                        ]
+                    },
+                    properties: { ...place }
+                }))
+            };
 
-            const data = geoJson.features.map(feature => {
-                const coords = feature.geometry ? feature.geometry.coordinates : [0, 0];
-                return {
-                    ...feature.properties,
-                    lng: coords[0],
-                    lat: coords[1]
-                };
-            });
-
-            let name = prompt("Enter a name for the imported canvas:", file.name.replace(/\.geojson|\.json/gi, ''));
-            if (!name) name = "Imported Canvas";
-
-            const newId = 'c_' + Date.now();
-            canvases.push({ id: newId, name });
+            const dataStr = JSON.stringify(geoJsonData, null, 2);
+            const blob = new Blob([dataStr], { type: "application/geo+json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
             
-            localStorage.setItem(`canvas_data_${newId}`, JSON.stringify(data));
-            saveCanvasState();
-            renderCanvasDropdown();
-            document.getElementById('canvas-select').value = newId;
-            switchCanvas(newId);
-            
-        } catch (err) {
-            alert("Failed to import. The file is not a valid GeoJSON FeatureCollection.");
+            const currentCanvas = canvases.find(c => c.id === activeCanvasId);
+            a.href = url;
+            a.download = `${currentCanvas.name.replace(/\s+/g, '_')}_export.geojson`;
+            a.click();
+            URL.revokeObjectURL(url);
         }
-        event.target.value = ''; 
-    };
-    reader.readAsText(file);
-}
 
+        function importCanvas(event) {
+            const file = event.target.files[0];
+            if (!file) return;
 
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const geoJson = JSON.parse(e.target.result);
+                    
+                    if (geoJson.type !== "FeatureCollection" || !Array.isArray(geoJson.features)) {
+                        throw new Error("Invalid format");
+                    }
 
+                    const data = geoJson.features.map(feature => {
+                        const coords = feature.geometry ? feature.geometry.coordinates : [0, 0];
+                        return {
+                            ...feature.properties,
+                            lng: coords[0],
+                            lat: coords[1]
+                        };
+                    });
 
+                    let name = prompt("Enter a name for the imported canvas:", file.name.replace(/\.geojson|\.json/gi, ''));
+                    if (!name) name = "Imported Canvas";
+
+                    const newId = 'c_' + Date.now();
+                    canvases.push({ id: newId, name });
+                    
+                    localStorage.setItem(`canvas_data_${newId}`, JSON.stringify(data));
+                    saveCanvasState();
+                    renderCanvasDropdown();
+                    document.getElementById('canvas-select').value = newId;
+                    switchCanvas(newId);
+                    
+                } catch (err) {
+                    alert("Failed to import. The file is not a valid GeoJSON FeatureCollection.");
+                }
+                event.target.value = ''; 
+            };
+            reader.readAsText(file);
+        }
 
         // --- Local Storage (Canvas specific) ---
         function getStorageKey() {
@@ -540,6 +581,7 @@ function importCanvas(event) {
                 title.innerText = "Add New Place";
                 document.getElementById('place-label').value = "";
                 document.getElementById('place-emoji').value = "📍";
+                document.getElementById('place-desc').value = "";
                 document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
                 document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
                 document.getElementById('current-id').value = Date.now();
@@ -549,6 +591,7 @@ function importCanvas(event) {
                 title.innerText = "Edit Place";
                 document.getElementById('place-label').value = placeData.label;
                 document.getElementById('place-emoji').value = placeData.emoji;
+                document.getElementById('place-desc').value = placeData.description || "";
                 document.getElementById('current-lat').value = placeData.lat;
                 document.getElementById('current-lng').value = placeData.lng;
                 document.getElementById('current-id').value = placeData.id;
@@ -566,12 +609,13 @@ function importCanvas(event) {
             const lng = parseFloat(document.getElementById('current-lng').value);
             const label = document.getElementById('place-label').value;
             const emoji = document.getElementById('place-emoji').value || "📍";
+            const description = document.getElementById('place-desc').value;
 
             if (!label) { alert("Label required"); return; }
 
             const places = getPlacesData();
             const index = places.findIndex(p => p.id == id);
-            const newPlace = { id, lat, lng, label, emoji };
+            const newPlace = { id, lat, lng, label, emoji, description };
 
             if (index > -1) {
                 places[index] = newPlace;
@@ -584,6 +628,11 @@ function importCanvas(event) {
 
             saveToStorage(places);
             createSavedMarker(newPlace);
+
+            if (activeSidebarPlaceId == id) {
+                showSidebar(newPlace);
+            }
+
             closeModal();
         }
 
@@ -595,6 +644,11 @@ function importCanvas(event) {
             const marker = savedMarkers.find(m => m.options.placeId == id);
             if (marker) map.removeLayer(marker);
             savedMarkers = savedMarkers.filter(m => m.options.placeId != id);
+            
+            if (id == activeSidebarPlaceId) {
+                closeSidebar();
+            }
+
             closeModal();
         }
 
@@ -603,6 +657,38 @@ function importCanvas(event) {
             localStorage.removeItem(getStorageKey());
             savedMarkers.forEach(m => map.removeLayer(m));
             savedMarkers = [];
+            closeSidebar();
+        }
+
+        // --- Sidebar View Logic ---
+        function showSidebar(placeData) {
+            activeSidebarPlaceId = placeData.id;
+            const sidebar = document.getElementById('sidebar');
+            const content = document.getElementById('sidebar-content');
+            
+            content.innerHTML = `
+                <div class="sidebar-title"><span>${placeData.emoji}</span> ${placeData.label}</div>
+                <div class="sidebar-coords">${placeData.lat.toFixed(5)}, ${placeData.lng.toFixed(5)}</div>
+                <div class="sidebar-desc">${placeData.description ? placeData.description : '<i>No description provided for this location.</i>'}</div>
+                <div class="sidebar-actions">
+                    <button onclick="editFromSidebar('${placeData.id}')">Edit Place</button>
+                    <button class="btn-secondary" onclick="closeSidebar()">Close</button>
+                </div>
+            `;
+            sidebar.style.display = 'flex';
+        }
+
+        function closeSidebar() {
+            document.getElementById('sidebar').style.display = 'none';
+            activeSidebarPlaceId = null;
+        }
+
+        function editFromSidebar(id) {
+            const places = getPlacesData();
+            const currentPlace = places.find(p => p.id == id);
+            if (currentPlace) {
+                openModal('edit', currentPlace);
+            }
         }
 
         // --- Render ---
@@ -626,7 +712,7 @@ function importCanvas(event) {
                 offset: [0, 10]        
             });
 
-            marker.on('click', () => { openModal('edit', placeData); });
+            marker.on('click', () => { showSidebar(placeData); });
             savedMarkers.push(marker);
         }
 
