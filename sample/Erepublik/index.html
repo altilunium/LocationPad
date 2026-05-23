@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Altilunium Locationpad</title>
+    <link rel="icon" href="https://static.miraheze.org/pustakawiki/4/42/Logo_pustaka.png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
+
+    <style>
+        /* General Reset */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; }
+
+        /* Map Container */
+        #map { height: 100%; width: 100%; z-index: 1; }
+
+        /* UI Overlay Elements */
+        .ui-container {
+            position: absolute;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            backdrop-filter: blur(5px);
+        }
+
+        /* Search Bar */
+        #search-box {
+            top: 20px;
+            left: 50px;
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #a71d2a; }
+
+        /* Delete All Button */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        /* Modal Styles */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #555; }
+        .form-group input { width: 100%; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .btn-secondary { background: #6c757d; }
+
+        /* Emoji Icon Style */
+        .emoji-marker {
+            font-family: 'Noto Color Emoji', sans-serif;
+            font-size: 30px;
+            text-align: center;
+            line-height: 1;
+            text-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        /* Label Style */
+        .custom-label {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #333;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            font-size: 11px;
+            font-weight: bold;
+            color: #000;
+            padding: 2px 5px;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-left:before, .leaflet-tooltip-right:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-top:before {
+            border: none !important;
+        }
+        
+        /* Context Menu */
+        #context-menu {
+            display: none;
+            position: absolute;
+            z-index: 3000;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            border-radius: 4px;
+            padding: 5px 0;
+            min-width: 150px;
+        }
+        #context-menu div { padding: 8px 15px; cursor: pointer; font-size: 14px; }
+        #context-menu div:hover { background-color: #f0f0f0; }
+
+        /* Popup Button Styles */
+        .popup-btn-container { margin-top:10px; display:flex; gap:5px; }
+        .popup-btn { padding: 3px 8px; font-size: 11px; }
+
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="search-box" class="ui-container">
+        <input type="text" id="coord-input" placeholder="Lat, Lng (e.g. -6.2, 106.8)">
+        <button onclick="handleSearch()">Go</button>
+    </div>
+
+    <div id="controls" class="ui-container">
+        <button class="danger" onclick="clearAllMarkers()">Delete All Markers</button>
+    </div>
+
+    <div id="context-menu">
+        <div onclick="openModal('add')">Add new places</div>
+    </div>
+
+    <div id="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="modal-title">Add New Place</div>
+            <input type="hidden" id="current-lat"><input type="hidden" id="current-lng"><input type="hidden" id="current-id">
+            
+            <div class="form-group">
+                <label>Label / Name</label>
+                <input type="text" id="place-label" placeholder="e.g. My Favorite Cafe">
+            </div>
+            
+            <div class="form-group">
+                <label>Icon (Emoji)</label>
+                <input type="text" id="place-emoji" placeholder="📍" value="📍">
+                <small style="font-size: 11px; color: #888;">Win: Win+. | Mac: Cmd+Ctrl+Space</small>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button onclick="savePlace()">Save</button>
+            </div>
+            
+            <div style="margin-top:10px; text-align: right;">
+                 <button id="btn-delete-single" class="danger" style="display:none; width:100%" onclick="deleteSinglePlace()">Delete Marker</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        // Init Map
+        const map = L.map('map').setView([26.86,46.27], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+
+        let searchMarker = null;
+        let savedMarkers = [];
+        let contextMenuTargetLatLng = null;
+
+        // --- Local Storage ---
+        function loadFromStorage() {
+            //const data = localStorage.getItem('myMapMarkers');
+            const data = `
+[
+    {
+        "id": "1779250623624",
+        "lat": 56.97879281774404,
+        "lng": 24.11666352104985,
+        "label": "Riga - Vidzeme - Latvia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779250688351",
+        "lat": 56.53290354226872,
+        "lng": 21.03323027068593,
+        "label": "Liepaja - Kurzeme - Latvia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779251835593",
+        "lat": 37.393892340861505,
+        "lng": -5.971542341247661,
+        "label": "Sevilla - Andalucia - Spain",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779251885207",
+        "lat": 43.37035296418924,
+        "lng": -5.8435090180567055,
+        "label": "Oviedo - Asturias - Spain",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779251945470",
+        "lat": 28.1120553727753,
+        "lng": -15.435841765542794,
+        "label": "Las Palmas de Gran Canaria - Canary Islands - Spain Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779251999582",
+        "lat": 39.860598953339725,
+        "lng": -4.035826613772496,
+        "label": "Toledo - Castilla La Mancha - Spain",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779252061309",
+        "lat": 41.6421013631853,
+        "lng": -4.731925118601121,
+        "label": "Valladolid - Castilla y Leon - Spain",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779252092589",
+        "lat": 42.46028542429723,
+        "lng": -2.452826969643782,
+        "label": "Logrono - La Rioja - Spain",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779281449537",
+        "lat": 44.7785626798204,
+        "lng": 17.201699617152745,
+        "label": "Banja Luka - West Srpska Republic - Bosnia and Herzegovina",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779281681520",
+        "lat": 59.43445607588285,
+        "lng": 24.739565429002376,
+        "label": "Tallinn - Pohja-Eesti - Estonia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779281733703",
+        "lat": 58.375226919588364,
+        "lng": 26.717421367477275,
+        "label": "Tartu - Louna-Eesti - Estonia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779281783519",
+        "lat": 58.37879529545277,
+        "lng": 24.54391660470847,
+        "label": "Parnu - Laane-Eesti - Estonia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779281829982",
+        "lat": 59.365053176078824,
+        "lng": 28.165337353517383,
+        "label": "Narva - Kirde-Eesti - Estonia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282189044",
+        "lat": 4.834168682128407,
+        "lng": 6.986938135574139,
+        "label": "Port Harcourt - South South States - Nigeria",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282239795",
+        "lat": 6.4572344987653585,
+        "lng": 3.3851623535156254,
+        "label": "Lagos - South West States - Nigeria",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282506794",
+        "lat": 38.5742905932256,
+        "lng": -7.927514036943357,
+        "label": "Evora - Alentejo - Portugal",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282559153",
+        "lat": 37.74050446437391,
+        "lng": -25.671255236649237,
+        "label": "Ponta Delgada - Azores - Capital Portugal",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282644057",
+        "lat": 33.78953369434725,
+        "lng": -84.40374675412804,
+        "label": "Atlanta - Georgia - Portugal",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779282697832",
+        "lat": 38.734677814586796,
+        "lng": -9.147037377649855,
+        "label": "Lisbon - Lisboa - Portugal",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282749896",
+        "lat": 32.65677574626324,
+        "lng": -16.92916113682435,
+        "label": "Funchal - Madeira - Portugal",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282947558",
+        "lat": 59.26616119760848,
+        "lng": 15.217494860530342,
+        "label": "Orebro - Gotaland - Sweden",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779282989598",
+        "lat": 57.63213266885877,
+        "lng": 18.315795451578843,
+        "label": "Visby - Gotland - Sweden",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283033934",
+        "lat": 63.17587726857222,
+        "lng": 14.664505531255706,
+        "label": "Ostersund - Jamtland Harjedalen - Sweden",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283091789",
+        "lat": 63.83016154897132,
+        "lng": 20.283836426019086,
+        "label": "Umea - Norrland and Sameland - Sweden",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283141525",
+        "lat": 55.57161085744554,
+        "lng": 13.034498579572016,
+        "label": "Malmo - Scania - Sweden",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283178828",
+        "lat": 59.33318942659219,
+        "lng": 18.061523437500004,
+        "label": "Stockholm - Svealand - Sweden Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283574523",
+        "lat": 45.74798307492378,
+        "lng": 21.228602024516086,
+        "label": "Timisoara - Banat - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283609025",
+        "lat": 47.74486557253244,
+        "lng": 26.67689606555964,
+        "label": "Botosani - Bucovina - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283647321",
+        "lat": 47.07222701912457,
+        "lng": 21.936753625210358,
+        "label": "Oradea - Crisana - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283700897",
+        "lat": 47.66192319158113,
+        "lng": 23.586998731867787,
+        "label": "Baia Mare - Maramures - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283739881",
+        "lat": 47.142943716675234,
+        "lng": 27.624033432709066,
+        "label": "Iasi - Moldova - Romania Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283790616",
+        "lat": 44.33000920364748,
+        "lng": 23.800824195633783,
+        "label": "Craiova - Oltenia - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779283848448",
+        "lat": 46.757871278573994,
+        "lng": 23.659755185585173,
+        "label": "Cluj-Napoca - Transilvania  - Romania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284142350",
+        "lat": 52.53627304145948,
+        "lng": 13.337402343750002,
+        "label": "Berlin - Brandenburg and Berlin - Poland (1860d)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779284199381",
+        "lat": 52.39506536594892,
+        "lng": 16.892019657636588,
+        "label": "Poznan - Great Poland - Poland",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284242853",
+        "lat": 48.19494711841088,
+        "lng": 16.38443345225654,
+        "label": "Vienna - Lower Austria - Poland",
+        "emoji": "🔁"
+    },
+    {
+        "id": "1779284306004",
+        "lat": 52.230019481601325,
+        "lng": 21.079216092740996,
+        "label": "Warsaw - Mazovia - Poland",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284353572",
+        "lat": 53.779367106794204,
+        "lng": 20.491626377647563,
+        "label": "Olsztyn - Mazuria - Poland",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284400940",
+        "lat": 49.214103872380896,
+        "lng": 16.55150052699348,
+        "label": "Brno - Moravia - Poland (1d)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779284453203",
+        "lat": 54.36932035544648,
+        "lng": 18.581257683068642,
+        "label": "Gdansk - Pomerania - Poland Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284507467",
+        "lat": 51.12280097712192,
+        "lng": 17.01579714450822,
+        "label": "Wroclaw - Silesia - Poland",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284647858",
+        "lat": 48.28748972891003,
+        "lng": 14.325393731875641,
+        "label": "Linz - Upper Austria - Poland",
+        "emoji": "🔁"
+    },
+    {
+        "id": "1779284969911",
+        "lat": 35.157109456392696,
+        "lng": 136.93109967415683,
+        "label": "Nagoya - Chubu - Japan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779284981527",
+        "lat": 35.68407153314097,
+        "lng": 139.72412109375003,
+        "label": "Tokyo - Kanto - Japan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285003879",
+        "lat": 34.67272445941786,
+        "lng": 135.43718426377103,
+        "label": "Osaka - Kinki - Japan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285237838",
+        "lat": 49.74596821854819,
+        "lng": 13.370593516119124,
+        "label": "Pizen - Southern Bohemia - Czech Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285268142",
+        "lat": 50.06226824017911,
+        "lng": 14.434083721446116,
+        "label": "Prague - Northern Bohemia  - Czech",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285488668",
+        "lat": -12.456061627483603,
+        "lng": 130.84369602132867,
+        "label": "Darwin - Northern Territory - Australia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285513324",
+        "lat": -34.980982242413496,
+        "lng": 138.59166492058895,
+        "label": "Adelaide - South Australia  - Australia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285569987",
+        "lat": -42.8131241445819,
+        "lng": 147.42290152218197,
+        "label": "Hobart - Tasmania - Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285736698",
+        "lat": 41.743015292010426,
+        "lng": 22.196405852016103,
+        "label": "Stip - Eastern Macedonia - North Macedonia Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779285767570",
+        "lat": 42.01232680751064,
+        "lng": 21.42076628296459,
+        "label": "Skopje - Povardarie - North Macedonia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287116895",
+        "lat": -8.112335067069465,
+        "lng": -79.02144707239077,
+        "label": "Trujillo - Chimor - Peru Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287146831",
+        "lat": -12.023330184353805,
+        "lng": -76.99790480940605,
+        "label": "Lima DC - Lima - Peru",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287172255",
+        "lat": -16.4037189865505,
+        "lng": -71.52716814417883,
+        "label": "Arequipa - Low Andes - Peru",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287195847",
+        "lat": -14.077423559589592,
+        "lng": -75.72850108634175,
+        "label": "Ica - Mid Andes",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287218847",
+        "lat": -3.7539365006799787,
+        "lng": -73.25721462348874,
+        "label": "Iquitos - Northern Low Amazon - Peru",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287732091",
+        "lat": 69.65777282580422,
+        "lng": 18.946166091598887,
+        "label": "Tromso - Nord-Norge - Norway",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287752619",
+        "lat": 78.22461928851365,
+        "lng": 15.637574063500166,
+        "label": "Longyearbyen - Svalbard & Jan Mayen - Norway Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287784795",
+        "lat": 63.43521670936678,
+        "lng": 10.411507954710883,
+        "label": "Trondheim - Trondelag - Norway",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287810755",
+        "lat": 60.38582205998514,
+        "lng": 5.342607757813235,
+        "label": "Bergen - Vestlandet - Norway",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779287936466",
+        "lat": 20.01362976310597,
+        "lng": -75.81720084603113,
+        "label": "Santiago de Cuba - Oriente - Cuba Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779288174136",
+        "lat": 10.172571610408777,
+        "lng": -67.99869267970438,
+        "label": "Valencia - Central Venezuela - Venezuela",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779288226264",
+        "lat": 10.081800049790047,
+        "lng": -69.36045017619004,
+        "label": "Barquisimeto - Central Western Venezuela - Venezuela",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779288253768",
+        "lat": 10.152964490403182,
+        "lng": -64.67908955853514,
+        "label": "Barcelona - North Eastern Venezuela - Venezuela",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779288267959",
+        "lat": 10.477008906900293,
+        "lng": -66.86279296875001,
+        "label": "Caracas - Venezuelan Capital  - Venezuela",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779331448313",
+        "lat": -26.15636527022442,
+        "lng": -58.17302599049118,
+        "label": "Formosa, South East Chaco, Argentine",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779331641400",
+        "lat": -27.47221631018865,
+        "lng": -58.817454077335825,
+        "label": "Corrientes - Mesopotamia - Argentina",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779331658239",
+        "lat": -34.81380331711314,
+        "lng": -58.4912109375,
+        "label": "Buenos Aires - Pampas - Argentina",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779331682495",
+        "lat": -38.95161916604397,
+        "lng": -68.06699648956098,
+        "label": "Neuquen - Patagonia - Argentina",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779332007733",
+        "lat": 13.001306356394668,
+        "lng": 77.59723025864703,
+        "label": "Bangalore - Karnataka - India",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779332031917",
+        "lat": 13.028586585139479,
+        "lng": 80.22094308272702,
+        "label": "Chennai - Tamil Nadu  - India",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779332266755",
+        "lat": 38.13610798980635,
+        "lng": 13.352463827991098,
+        "label": "Palermo - Sicily - Italia Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779332291787",
+        "lat": 39.2312262045336,
+        "lng": 9.126656895538655,
+        "label": "Cagliari - Sardinia  - Italia",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779356816942",
+        "lat": 24.252225985128888,
+        "lng": 120.66443735448708,
+        "label": "Taichung - Central Taiwan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779356845950",
+        "lat": 25.06472166474744,
+        "lng": 121.56564470187067,
+        "label": "Taipei - Northern Taiwan (Capital)",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779357106436",
+        "lat": 22.647477201356303,
+        "lng": 120.30846051237482,
+        "label": "Kaohsiung - Southern Taiwan",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779357531825",
+        "lat": 55.71189869894058,
+        "lng": 21.158192310051685,
+        "label": "Klaipeda - Lithuania Minor - Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779357726023",
+        "lat": 55.74286577212956,
+        "lng": 24.356336049539085,
+        "label": "Panevezys - Lithuanian Highland ",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779357749832",
+        "lat": 55.98493497605483,
+        "lng": 22.2417639826901,
+        "label": "Telsiai - Samogitia - Lithuania",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779357775687",
+        "lat": 55.19190758480196,
+        "lng": 30.251872255994112,
+        "label": "Vitsebsk -  Vitsebskaya - Lithuania (65d)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779358024749",
+        "lat": 46.85740673276169,
+        "lng": 9.539847076834072,
+        "label": "Chur - Graubunden - Switzerland Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779441194897",
+        "lat": 20.019611519745347,
+        "lng": 110.20280591197556,
+        "label": "Haikou - Hainan - Thailand (62 d)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779441318440",
+        "lat": 14.583583455156525,
+        "lng": 121.02539062500001,
+        "label": "Manila - Luzon - Thailand Capital (159 d)",
+        "emoji": "💥"
+    },
+    {
+        "id": "1779441512142",
+        "lat": 7.098208138536773,
+        "lng": 125.60596236113939,
+        "label": "Davao - Mindanao - Philippines ",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779441536878",
+        "lat": 9.896496995003918,
+        "lng": 118.70914461806642,
+        "label": "Puerto Princesa - Palawan - Philippines Capital",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779441562774",
+        "lat": 10.322456050114816,
+        "lng": 123.8832894920399,
+        "label": "Cebu - Visayas - Philippines ",
+        "emoji": "📍"
+    },
+    {
+        "id": "1779527423247",
+        "lat": 45.95584658272439,
+        "lng": -66.67244752765396,
+        "label": "Fredericton - New Brunswick - Canada",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779527451270",
+        "lat": 62.46302140683398,
+        "lng": -114.38085345823023,
+        "label": "Yellowknife - Northwest Territories - Canada Capital",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779527478286",
+        "lat": 44.64444958287614,
+        "lng": -63.63221495049418,
+        "label": "Halifax - Nova Scotia - Canada",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779527512926",
+        "lat": 46.76196865619572,
+        "lng": -71.15967059267915,
+        "label": "Quebec City - Quebec - Canada",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779527536110",
+        "lat": 60.71178341456,
+        "lng": -135.07826508213614,
+        "label": "Whitehorse - Yukon - Canada",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779540456690",
+        "lat": 50.863618863415354,
+        "lng": 5.70364927655246,
+        "label": "Maastricht - Southern Netherlands",
+        "emoji": "📍",
+        "description": ""
+    },
+    {
+        "id": "1779540468098",
+        "lat": 52.395715477302105,
+        "lng": 4.833984375000001,
+        "label": "Amsterdam - Western Netherlands (Capital)",
+        "emoji": "📍",
+        "description": ""
+    }
+]
+            `
+            if (data) JSON.parse(data).forEach(place => createSavedMarker(place));
+        }
+
+        function saveToStorage(placesArray) {
+            localStorage.setItem('myMapMarkers', JSON.stringify(placesArray));
+        }
+
+        function getPlacesData() {
+            return JSON.parse(localStorage.getItem('myMapMarkers') || "[]");
+        }
+
+        // --- Search ---
+        function handleSearch() {
+            const input = document.getElementById('coord-input').value;
+            const parts = input.split(',');
+            if (parts.length !== 2) { alert("Format: Lat, Lng"); return; }
+            
+            const lat = parseFloat(parts[0].trim());
+            const lng = parseFloat(parts[1].trim());
+            if (isNaN(lat) || isNaN(lng)) { alert("Invalid coords"); return; }
+
+            if (searchMarker) map.removeLayer(searchMarker);
+            searchMarker = L.marker([lat, lng]).addTo(map);
+            
+            // Popup with 2 buttons and helper text
+            const popupContent = `
+                <div>
+                    <strong>Search Result</strong><br>${lat}, ${lng}
+                    <div class="popup-btn-container">
+                        <button onclick="removeSearchMarker()" class="danger popup-btn">Close</button>
+                        <button onclick="addFromSearch(${lat}, ${lng})" class="popup-btn">Add Place</button>
+                    </div>
+                    <div style="margin-top:5px; font-size:10px; color:#666; font-style:italic;">
+                        Or right-click to add place
+                    </div>
+                </div>
+            `;
+
+            searchMarker.bindPopup(popupContent).openPopup();
+
+            // Right click functionality on the marker itself
+            searchMarker.on('contextmenu', function(e) { showContextMenu(e, lat, lng); });
+            map.flyTo([lat, lng], 15);
+        }
+
+        function removeSearchMarker() {
+            if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+        }
+
+        function addFromSearch(lat, lng) {
+            // Set the target coordinates then open modal
+            contextMenuTargetLatLng = { lat, lng };
+            openModal('add');
+        }
+
+        // --- Context Menu ---
+        const contextMenu = document.getElementById('context-menu');
+        
+        function showContextMenu(e, lat, lng) {
+            contextMenuTargetLatLng = { lat, lng };
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.containerPoint.x + 'px';
+            contextMenu.style.top = e.containerPoint.y + 'px';
+        }
+
+        map.on('contextmenu', (e) => {
+            showContextMenu(e, e.latlng.lat, e.latlng.lng);
+        });
+
+        map.on('click', () => { contextMenu.style.display = 'none'; });
+
+        // --- CRUD Modal ---
+        function openModal(mode, placeData = null) {
+            contextMenu.style.display = 'none';
+            const modal = document.getElementById('modal');
+            const title = document.getElementById('modal-title');
+            const delBtn = document.getElementById('btn-delete-single');
+
+            if (mode === 'add') {
+                title.innerText = "Add New Place";
+                document.getElementById('place-label').value = "";
+                document.getElementById('place-emoji').value = "📍";
+                document.getElementById('current-lat').value = contextMenuTargetLatLng.lat;
+                document.getElementById('current-lng').value = contextMenuTargetLatLng.lng;
+                document.getElementById('current-id').value = Date.now();
+                delBtn.style.display = "none";
+            } else {
+                title.innerText = "Edit Place";
+                document.getElementById('place-label').value = placeData.label;
+                document.getElementById('place-emoji').value = placeData.emoji;
+                document.getElementById('current-lat').value = placeData.lat;
+                document.getElementById('current-lng').value = placeData.lng;
+                document.getElementById('current-id').value = placeData.id;
+                delBtn.style.display = "block";
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        function savePlace() {
+            const id = document.getElementById('current-id').value;
+            const lat = parseFloat(document.getElementById('current-lat').value);
+            const lng = parseFloat(document.getElementById('current-lng').value);
+            const label = document.getElementById('place-label').value;
+            const emoji = document.getElementById('place-emoji').value || "📍";
+
+            if (!label) { alert("Label required"); return; }
+
+            const places = getPlacesData();
+            const index = places.findIndex(p => p.id == id);
+            const newPlace = { id, lat, lng, label, emoji };
+
+            if (index > -1) {
+                places[index] = newPlace;
+                const existing = savedMarkers.find(m => m.options.placeId == id);
+                if(existing) map.removeLayer(existing);
+            } else {
+                places.push(newPlace);
+                removeSearchMarker(); // Close search marker if adding new
+            }
+
+            saveToStorage(places);
+            createSavedMarker(newPlace);
+            closeModal();
+        }
+
+        function deleteSinglePlace() {
+            const id = document.getElementById('current-id').value;
+            if(!confirm("Delete this marker?")) return;
+            const places = getPlacesData().filter(p => p.id != id);
+            saveToStorage(places);
+            const marker = savedMarkers.find(m => m.options.placeId == id);
+            if (marker) map.removeLayer(marker);
+            savedMarkers = savedMarkers.filter(m => m.options.placeId != id);
+            closeModal();
+        }
+
+        function clearAllMarkers() {
+            if(!confirm("Delete ALL markers?")) return;
+            localStorage.removeItem('myMapMarkers');
+            savedMarkers.forEach(m => map.removeLayer(m));
+            savedMarkers = [];
+        }
+
+        // --- Render ---
+        function createSavedMarker(placeData) {
+            const emojiIcon = L.divIcon({
+                className: 'emoji-marker',
+                html: `<div>${placeData.emoji}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([placeData.lat, placeData.lng], {
+                icon: emojiIcon,
+                placeId: placeData.id
+            }).addTo(map);
+
+            marker.bindTooltip(placeData.label, { 
+                permanent: true,       
+                direction: 'bottom',   
+                className: 'custom-label', 
+                offset: [0, 10]        
+            });
+
+            marker.on('click', () => { openModal('edit', placeData); });
+            savedMarkers.push(marker);
+        }
+
+        loadFromStorage();
+        document.getElementById('coord-input').addEventListener("keypress", (e) => { if (e.key === "Enter") handleSearch(); });
+
+    </script>
+</body>
+</html>
