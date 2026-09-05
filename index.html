@@ -66,7 +66,7 @@
         /* Canvas Manager Dropdown */
         #canvas-manager {
             position: relative;
-            display: none; /* Hidden by default */
+            display: none; 
             flex-direction: column;
             align-items: stretch;
             gap: 8px;
@@ -197,7 +197,7 @@
             box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
             border-radius: 4px;
             padding: 5px 0;
-            min-width: 150px;
+            min-width: 170px;
         }
         #context-menu div { padding: 8px 15px; cursor: pointer; font-size: 14px; }
         #context-menu div:hover { background-color: #f0f0f0; }
@@ -264,9 +264,27 @@
     <div id="controls" class="ui-container">
         <button class="danger" onclick="clearAllMarkers()">Delete All in Canvas</button>
     </div>
+    
+    <!-- New Valhalla Routing UI Element -->
+    <div id="routing-ui" class="ui-container" style="display: none; bottom: 80px; right: 20px; flex-direction: column; gap: 8px; align-items: flex-start; min-width: 160px;">
+        <strong style="font-size:14px; margin:0;">Valhalla Routing</strong>
+        <div id="route-status" style="font-size:12px; color:#555; margin:0;">Points: 0</div>
+        <select id="route-mode" style="padding: 4px; border-radius: 4px; width:100%;">
+            <option value="auto">Car</option>
+            <option value="bicycle">Bike</option>
+            <option value="pedestrian">Shortest Path</option>
+        </select>
+        <div style="display: flex; gap: 5px; width:100%;">
+            <button onclick="calculateRoute()" style="flex:1;">Route</button>
+            <button class="danger" onclick="clearRoute()" style="flex:1;">Clear</button>
+        </div>
+    </div>
 
     <div id="context-menu">
         <div onclick="openModal('add')">Add new places</div>
+        <div onclick="handleMeasurePoint()">Measure Distance</div>
+        <div id="cm-clear-measure" onclick="clearMeasurement()" style="display:none; color:#dc3545;">Clear Measurement</div>
+        <div onclick="handleAddRoutePoint()">Add to Route</div>
     </div>
 
     <div id="sidebar">
@@ -322,6 +340,16 @@
         let savedMarkers = [];
         let contextMenuTargetLatLng = null;
         let activeSidebarPlaceId = null;
+
+        // --- Distance Measurement State ---
+        let measurePoints = [];
+        let measureMarkers = [];
+        let measureLine = null;
+
+        // --- Routing State ---
+        let routePoints = [];
+        let routeMarkers = [];
+        let routeLine = null;
 
         // --- UI Toggles ---
         function toggleCanvasMenu() {
@@ -563,11 +591,149 @@
             contextMenu.style.display = 'block';
             contextMenu.style.left = e.containerPoint.x + 'px';
             contextMenu.style.top = e.containerPoint.y + 'px';
+            document.getElementById('cm-clear-measure').style.display = measurePoints.length > 0 ? 'block' : 'none';
         }
 
         map.on('contextmenu', (e) => {
             showContextMenu(e, e.latlng.lat, e.latlng.lng);
         });
+
+        // --- Measure Tools Logic ---
+        function handleMeasurePoint() {
+            contextMenu.style.display = 'none';
+            if (measurePoints.length >= 2) {
+                clearMeasurement();
+            }
+            
+            let latlng = L.latLng(contextMenuTargetLatLng.lat, contextMenuTargetLatLng.lng);
+            measurePoints.push(latlng);
+            
+            let m = L.circleMarker(latlng, {color: '#dc3545', radius: 5, fillOpacity: 1}).addTo(map);
+            measureMarkers.push(m);
+
+            if (measurePoints.length === 2) {
+                let dist = measurePoints[0].distanceTo(measurePoints[1]); 
+                measureLine = L.polyline(measurePoints, {color: '#dc3545', dashArray: '6, 6', weight: 4}).addTo(map);
+                measureLine.bindPopup(`<strong>Distance:</strong><br>${(dist/1000).toFixed(2)} km<br>${dist.toFixed(0)} meters`).openPopup();
+            }
+        }
+        
+        function clearMeasurement() {
+            contextMenu.style.display = 'none';
+            measurePoints = [];
+            if (measureLine) {
+                map.removeLayer(measureLine);
+                measureLine = null;
+            }
+            measureMarkers.forEach(m => map.removeLayer(m));
+            measureMarkers = [];
+        }
+
+        // --- Routing Tools Logic ---
+        function handleAddRoutePoint() {
+            contextMenu.style.display = 'none';
+            let ptId = 'rp_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+            let latlng = L.latLng(contextMenuTargetLatLng.lat, contextMenuTargetLatLng.lng);
+            latlng.customId = ptId;
+            routePoints.push(latlng);
+            
+            let m = L.circleMarker(latlng, {color: '#007bff', radius: 6, fillOpacity: 1}).addTo(map);
+            m.customId = ptId;
+            m.bindTooltip(`Route Point ${routePoints.length}`, {permanent: true, direction: 'right'}).openTooltip();
+            
+            const popupContent = `<div style="text-align:center;">
+                <strong style="font-size:12px;">Route Point</strong><br>
+                <button class="danger popup-btn" style="margin-top:5px;" onclick="removeRoutePoint('${ptId}')">Delete Point</button>
+            </div>`;
+            m.bindPopup(popupContent);
+            
+            routeMarkers.push(m);
+            
+            document.getElementById('routing-ui').style.display = 'flex';
+            document.getElementById('route-status').innerText = `Points Selected: ${routePoints.length}`;
+        }
+
+        function removeRoutePoint(ptId) {
+            const pIdx = routePoints.findIndex(p => p.customId === ptId);
+            if (pIdx > -1) routePoints.splice(pIdx, 1);
+            
+            const mIdx = routeMarkers.findIndex(m => m.customId === ptId);
+            if (mIdx > -1) {
+                map.removeLayer(routeMarkers[mIdx]);
+                routeMarkers.splice(mIdx, 1);
+            }
+            
+            routeMarkers.forEach((m, i) => {
+                m.setTooltipContent(`Route Point ${i + 1}`);
+            });
+            
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+            
+            document.getElementById('route-status').innerText = `Points Selected: ${routePoints.length}`;
+            if (routePoints.length === 0) {
+                document.getElementById('routing-ui').style.display = 'none';
+            }
+        }
+
+        function clearRoute() {
+            routePoints = [];
+            if (routeLine) map.removeLayer(routeLine);
+            routeMarkers.forEach(m => map.removeLayer(m));
+            routeMarkers = [];
+            routeLine = null;
+            document.getElementById('routing-ui').style.display = 'none';
+        }
+
+        function decodePolyline6(str, precision = 6) {
+            let index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, latitude_change, longitude_change, factor = Math.pow(10, precision);
+            while (index < str.length) {
+                byte = null; shift = 0; result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                latitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                shift = result = 0;
+                do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+                longitude_change = ((result & 1) ? ~(result >> 1) : (result >> 1));
+                lat += latitude_change; lng += longitude_change;
+                coordinates.push([lat / factor, lng / factor]);
+            }
+            return coordinates;
+        }
+
+        async function calculateRoute() {
+            if (routePoints.length < 2) { alert("Please select at least 2 points to generate a route."); return; }
+            const mode = document.getElementById('route-mode').value;
+            const locations = routePoints.map(p => ({ lat: p.lat, lon: p.lng }));
+            const req = {
+                locations: locations,
+                costing: mode,
+                units: "kilometers"
+            };
+            
+            try {
+                const resp = await fetch('https://valhalla1.openstreetmap.de/route', {
+                    method: 'POST',
+                    body: JSON.stringify(req)
+                });
+                const data = await resp.json();
+                
+                if (data.trip && data.trip.legs) {
+                    if (routeLine) map.removeLayer(routeLine);
+                    let allCoords = [];
+                    data.trip.legs.forEach(leg => {
+                        allCoords = allCoords.concat(decodePolyline6(leg.shape, 6));
+                    });
+                    routeLine = L.polyline(allCoords, {color: '#007bff', weight: 5, opacity: 0.8}).addTo(map);
+                    map.fitBounds(routeLine.getBounds());
+                } else {
+                    alert("A path could not be resolved for the requested points. Try adjusting locations or travel modes.");
+                }
+            } catch(e) {
+                alert("The routing request failed: " + e.message);
+            }
+        }
 
         // --- CRUD Modal ---
         function openModal(mode, placeData = null) {
