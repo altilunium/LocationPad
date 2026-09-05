@@ -726,6 +726,15 @@
                         allCoords = allCoords.concat(decodePolyline6(leg.shape, 6));
                     });
                     routeLine = L.polyline(allCoords, {color: '#007bff', weight: 5, opacity: 0.8}).addTo(map);
+                    
+                    const distance = data.trip.summary.length.toFixed(2);
+                    const totalSeconds = data.trip.summary.time;
+                    const hours = Math.floor(totalSeconds / 3600);
+                    const minutes = Math.floor((totalSeconds % 3600) / 60);
+                    let timeString = hours > 0 ? `${hours} hr ${minutes} min` : `${minutes} min`;
+                    
+                    routeLine.bindPopup(`<div style="text-align:center; font-size:13px;"><strong>Route Summary</strong><br>Distance: ${distance} km<br>Est. Time: ${timeString}</div>`);
+                    
                     map.fitBounds(routeLine.getBounds());
                 } else {
                     alert("A path could not be resolved for the requested points. Try adjusting locations or travel modes.");
